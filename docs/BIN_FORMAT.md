@@ -5,9 +5,7 @@ This document describes the on-disk layout of a War Thunder map `.bin` file
 Everything here is reverse-engineered; field names come from War Thunder's
 CDK source where available (see `docs/CDK_KNOWLEDGE.md`).
 
-> Run `wt-map-extractor --inspect --no-serve <map1> <map2>` to generate a
-> fresh `maps/<map>/inspect.txt` for any level. The two reference reports
-> used to build this document are:
+> The two reference inspect reports used to build this document are:
 >
 > - [`maps/air_israel/inspect.txt`](../maps/air_israel/inspect.txt)
 > - [`maps/avg_japan/inspect.txt`](../maps/avg_japan/inspect.txt)
@@ -697,7 +695,6 @@ Remaining nuances (refinement targets, not blockers):
 - **Detour nav-mesh internals** — opaque by design; would require
   linking/implementing Detour to decode.
 
-Regenerate the inspect reports (`wt-map-extractor --inspect`) whenever
-the extractor changes, and diff them against the reference copies in
-`maps/air_israel/` and `maps/avg_japan/` to confirm coverage does not
-regress.
+When the extractor/parser changes, refresh and diff the reference inspect
+reports under `maps/air_israel/` and `maps/avg_japan/` to confirm coverage
+does not regress.

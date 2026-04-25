@@ -5,11 +5,14 @@ use std::sync::Arc;
 use std::hash::{Hash, Hasher};
 
 use anyhow::Result;
+use image::codecs::jpeg::JpegEncoder;
 use image::{DynamicImage, ImageBuffer, Rgb, Rgba, RgbaImage};
 use rayon::prelude::*;
 use serde_json::{json, Value};
 
 use crate::util::{decode_dds_bytes, read_u32_le};
+
+const COLORMAP_JPEG_QUALITY: u8 = 82;
 
 /// In-memory DDS store: stem name (no extension) → raw DDS bytes.
 pub type DdsStore = HashMap<String, Vec<u8>>;
@@ -120,9 +123,17 @@ pub fn export_overview(map_name: &str, dds_store: &DdsStore, viewer_dir: &Path) 
         }
 
         let rgb = img.to_rgb8();
-        rgb.save(viewer_dir.join("colormap.png"))?;
+        let out_path = viewer_dir.join("colormap.jpg");
+        let f = std::fs::File::create(&out_path)?;
+        let mut enc = JpegEncoder::new_with_quality(std::io::BufWriter::new(f), COLORMAP_JPEG_QUALITY);
+        enc.encode(
+            rgb.as_raw(),
+            rgb.width(),
+            rgb.height(),
+            image::ExtendedColorType::Rgb8,
+        )?;
         return Ok(Some(json!({
-            "file": "colormap.png",
+            "file": "colormap.jpg",
             "width": w,
             "height": h,
             "format": fmt
@@ -228,13 +239,13 @@ pub fn export_materials(
         bytes.hash(&mut hasher);
         let sig = hasher.finish();
 
-        let base_name = format!("{stem}.png");
+        let base_name = format!("{stem}.webp");
         let mut shared_name = base_name.clone();
         let mut shared_path = shared_mat_dir.join(&shared_name);
         if shared_path.exists() {
             let same = fs::metadata(&shared_path).ok().map(|m| m.len()).unwrap_or(0) == bytes.len() as u64;
             if !same {
-                shared_name = format!("{}_{:016x}.png", stem, sig);
+                shared_name = format!("{}_{:016x}.webp", stem, sig);
                 shared_path = shared_mat_dir.join(&shared_name);
             }
         }

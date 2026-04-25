@@ -85,9 +85,18 @@ fn write_debug_thumbs(viewer_dir: &Path) -> Result<()> {
         }
     };
 
-    make_thumb("terrain_paint.png", "terrain_paint_thumb.png");
+    let terrain_paint_src = if viewer_dir.join("terrain_paint.jpg").exists() {
+        "terrain_paint.jpg"
+    } else {
+        "terrain_paint.png"
+    };
+    make_thumb(terrain_paint_src, "terrain_paint_thumb.png");
     make_thumb("heightmap.png", "heightmap_thumb.png");
-    make_thumb("colormap.png", "colormap_thumb.png");
+    if viewer_dir.join("colormap.jpg").exists() {
+        make_thumb("colormap.jpg", "colormap_thumb.png");
+    } else {
+        make_thumb("colormap.png", "colormap_thumb.png");
+    }
     make_thumb("tile_grid.png", "tile_grid_thumb.png");
 
     let mat_dir = viewer_dir.join("mat");
@@ -97,7 +106,8 @@ fn write_debug_thumbs(viewer_dir: &Path) -> Result<()> {
         if let Ok(rd) = fs::read_dir(&mat_dir) {
             for entry in rd.flatten() {
                 let p = entry.path();
-                if p.extension().and_then(|e| e.to_str()) != Some("png") {
+                let ext = p.extension().and_then(|e| e.to_str()).unwrap_or_default();
+                if ext != "png" && ext != "webp" {
                     continue;
                 }
                 if let Ok(img) = image::open(&p) {
@@ -117,9 +127,7 @@ fn write_debug_thumbs(viewer_dir: &Path) -> Result<()> {
 
 #[derive(Debug, Clone)]
 pub struct BuildOptions {
-    pub local_output: bool,
     pub export_mat: bool,
-    pub preconvert_mat: bool,
     pub export_thumbs: bool,
     pub clean_maps_on_all: bool,
     pub skip_tile_grid: bool,
@@ -128,10 +136,6 @@ pub struct BuildOptions {
     pub sun_azimuth: f64,
     pub sun_elevation: f64,
     pub sun_strength: f64,
-    /// Emit extra diagnostics: dump per-map landclass BLK name-map, log
-    /// cells referencing synth `lc_N` slots, export per-cell splat weight
-    /// atlas in manifest for browser-side per-pixel hover.
-    pub debug: bool,
 }
 
 #[derive(Debug)]
@@ -184,71 +188,6 @@ impl Pipeline {
                 fs::remove_file(&path)
                     .with_context(|| format!("Failed to remove {}", path.display()))?;
             }
-        }
-        Ok(())
-    }
-
-    pub fn preconvert_shared_materials(&self, verbose: bool) -> Result<()> {
-        let mut dxp_paths: BTreeSet<PathBuf> = BTreeSet::new();
-        for dir in [&self.cfg.all_levels, &self.cfg.hq_context_dir, &self.cfg.context_dir] {
-            if !dir.exists() {
-                continue;
-            }
-            for entry in fs::read_dir(dir)
-                .with_context(|| format!("Failed to read {}", dir.display()))?
-            {
-                let p = entry?.path();
-                if !p.is_file() {
-                    continue;
-                }
-                let name = p.file_name().and_then(|s| s.to_str()).unwrap_or_default();
-                if name.ends_with(".dxp.bin") {
-                    dxp_paths.insert(p);
-                }
-            }
-        }
-
-        if dxp_paths.is_empty() {
-            if verbose {
-                eprintln!("  No DxP packs found for preconversion.");
-            }
-            return Ok(());
-        }
-
-        if verbose {
-            eprintln!("  Preconverting materials from {} DxP packs (streaming)...", dxp_paths.len());
-        }
-
-        let bootstrap_viewer = self.cfg.project_root.join("maps").join("_bootstrap");
-        fs::create_dir_all(&bootstrap_viewer)?;
-
-        // Process one DxP at a time: extract → export → drop. This keeps
-        // peak memory bounded to a single pack regardless of dataset size.
-        let mut tex_written = 0usize;
-        let mut mat_total = 0usize;
-        for p in dxp_paths {
-            let store = match extract_dxp(&p) {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!("  Warning: failed to read {}: {e}", p.display());
-                    continue;
-                }
-            };
-            tex_written += store.len();
-            match export_materials("__precache__", &store, &bootstrap_viewer, None) {
-                Ok(mats) => { mat_total += mats.len(); }
-                Err(e) => eprintln!("  Warning: export failed for {}: {e}", p.display()),
-            }
-            // `store` drops here; the OS file cache still holds the DxP bytes
-            // for a short while but the decoded PNGs/RGBA buffers are gone.
-        }
-
-        if verbose {
-            eprintln!(
-                "  Preconvert complete: {} extracted DDS textures, {} shared material entries",
-                tex_written,
-                mat_total
-            );
         }
         Ok(())
     }
@@ -313,11 +252,6 @@ impl Pipeline {
         eprintln!();
         let progress = Progress::new(maps.len());
         progress.print_header(workers);
-
-        if opts.export_mat && opts.preconvert_mat {
-            self.preconvert_shared_materials(true)?;
-            eprintln!();
-        }
 
         let pool = ThreadPoolBuilder::new()
             .num_threads(workers)
@@ -387,31 +321,6 @@ impl Pipeline {
         self.build_one_internal(map_name, opts, true, None)
     }
 
-    /// Write a detailed `inspect.txt` next to the output folder for the given
-    /// map, walking every known DBLD structure and hex-dumping any unknown
-    /// region. Does not build viewer outputs.
-    pub fn inspect_map(&self, map_name: &str) -> Result<PathBuf> {
-        let levels_candidates = [
-            self.cfg.for_test_levels.clone(),
-            self.cfg.all_levels.clone(),
-            self.cfg.aces_levels.clone(),
-        ];
-        let bin_path = levels_candidates
-            .iter()
-            .map(|d| d.join(format!("{map_name}.bin")))
-            .find(|p| p.exists())
-            .ok_or_else(|| anyhow!(
-                "Could not find {map_name}.bin under for_test/levels, client levels, or datamine levels"
-            ))?;
-
-        let out_dir = self.cfg.project_root.join("maps").join(map_name);
-        fs::create_dir_all(&out_dir)
-            .with_context(|| format!("Failed to create {}", out_dir.display()))?;
-        let out_path = out_dir.join("inspect.txt");
-        crate::inspect::inspect_bin_file(&bin_path, &out_path)?;
-        Ok(out_path)
-    }
-
     fn build_one_internal(&self, map_name: Option<&str>, opts: &BuildOptions, verbose: bool, preloaded_bin: Option<Arc<Vec<u8>>>) -> Result<()> {
         let mut levels = self.cfg.for_test_levels.clone();
 
@@ -430,20 +339,18 @@ impl Pipeline {
             }
         }
 
-        let viewer_dir = if opts.local_output {
-            self.cfg.project_root.clone()
-        } else {
-            self.cfg
-                .project_root
-                .join("maps")
-                .join(&map)
-        };
+        let viewer_dir = self
+            .cfg
+            .project_root
+            .join("maps")
+            .join(&map);
 
         if viewer_dir.exists() {
             // Don't delete the entire map folder, just clean known output files
             let _ = fs::remove_file(viewer_dir.join("heightmap.png"));
             let _ = fs::remove_file(viewer_dir.join("heightmap_detail.png"));
             let _ = fs::remove_file(viewer_dir.join("normalmap_detail.png"));
+            let _ = fs::remove_file(viewer_dir.join("colormap.jpg"));
             let _ = fs::remove_file(viewer_dir.join("colormap.png"));
             let _ = fs::remove_file(viewer_dir.join("tile_grid.json"));
             let _ = fs::remove_file(viewer_dir.join("terrain_paint.png"));
@@ -460,7 +367,7 @@ impl Pipeline {
             fs::create_dir_all(&viewer_dir)
                 .with_context(|| format!("Failed to create {}", viewer_dir.display()))?;
         }
-        if opts.export_mat && !opts.preconvert_mat {
+        if opts.export_mat {
             fs::create_dir_all(viewer_dir.join("mat"))?;
         }
         if opts.export_thumbs {
@@ -744,91 +651,11 @@ impl Pipeline {
                 .with_context(|| format!("Failed to write {}", missions_path.display()))?;
         }
 
-        let materials = if opts.export_mat && !opts.preconvert_mat {
+        let materials = if opts.export_mat {
             export_materials(&map, &dds_store, &viewer_dir, Some(&material_names))?
         } else {
             vec![]
         };
-
-        // --debug diagnostics. Dump synthesised `lc_N` usage and raw BLK
-        // name-map so users can audit whether missing LC slots are a parser
-        // miss or authored gaps in the level source.
-        if opts.debug {
-            if let Some(paint_obj) = paint_info.as_object() {
-                let lc_names: Vec<&str> = paint_obj
-                    .get("lcNames")
-                    .and_then(Value::as_array)
-                    .map(|a| a.iter().filter_map(Value::as_str).collect())
-                    .unwrap_or_default();
-                let mut synth_indices: Vec<usize> = lc_names
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, n)| n.strip_prefix("lc_").and_then(|s| s.parse::<usize>().ok()) == Some(*i))
-                    .map(|(i, _)| i)
-                    .collect();
-                synth_indices.sort();
-                if !synth_indices.is_empty() {
-                    println!("[debug] Synthesised landclass slots for {}:", map);
-                    let cell_lc = paint_obj
-                        .get("cellLcIndices")
-                        .and_then(Value::as_array);
-                    let grid_w = paint_obj.get("gridW").and_then(Value::as_u64).unwrap_or(0) as usize;
-                    for si in &synth_indices {
-                        let mut occurrences: Vec<(usize, usize, usize)> = Vec::new();
-                        if let Some(cells) = cell_lc {
-                            for (ci, det) in cells.iter().enumerate() {
-                                if let Some(arr) = det.as_array() {
-                                    for (slot, v) in arr.iter().enumerate() {
-                                        if v.as_u64() == Some(*si as u64) {
-                                            let gx = if grid_w > 0 { ci % grid_w } else { 0 };
-                                            let gy = if grid_w > 0 { ci / grid_w } else { 0 };
-                                            occurrences.push((gx, gy, slot));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        println!(
-                            "  lc_{si}: referenced in {} det slots",
-                            occurrences.len()
-                        );
-                        for (gx, gy, slot) in occurrences.iter().take(8) {
-                            let channel = match slot {
-                                0 => "Base",
-                                1 => "R",
-                                2 => "G",
-                                3 => "B",
-                                4 => "G2",
-                                5 => "R2",
-                                6 => "A2",
-                                _ => "?",
-                            };
-                            println!("    cell ({gx},{gy}) slot {slot} ({channel})");
-                        }
-                        if occurrences.len() > 8 {
-                            println!("    ... and {} more", occurrences.len() - 8);
-                        }
-                    }
-                }
-            }
-
-            // Raw BLK name-map dump (truncated) from detailData, for
-            // comparison against the parsed `landclasses` list.
-            if let Some(ref data) = bin_slice {
-                if let Some(dd) = crate::landclass::extract_detail_data(data) {
-                    let dump_path = viewer_dir.join("detailData_namemap.bin");
-                    if let Err(e) = std::fs::write(&dump_path, &dd) {
-                        eprintln!("  ! failed to write {}: {e:#}", dump_path.display());
-                    } else {
-                        println!(
-                            "[debug] Wrote raw detailData BLK dump ({} bytes) to {}",
-                            dd.len(),
-                            dump_path.display()
-                        );
-                    }
-                }
-            }
-        }
 
         let map_coord0 = read_vec2(&blkx, "mapCoord0").unwrap_or([-32768.0, -32768.0]);
         let map_coord1 = read_vec2(&blkx, "mapCoord1").unwrap_or([32768.0, 32768.0]);
@@ -919,7 +746,7 @@ impl Pipeline {
                 "dxpTexturesExtracted": dxp_tex_count,
                 "dxpIndexResolved": index_resolved,
                 "materialsRequested": opts.export_mat,
-                "materialsPreconverted": opts.export_mat && opts.preconvert_mat,
+                "materialsPreconverted": false,
                 "thumbnailsRequested": opts.export_thumbs,
                 "tileGridSkipped": opts.skip_tile_grid,
                 "rendinstSkipped": opts.skip_rendinst,

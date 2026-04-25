@@ -96,7 +96,7 @@ export function buildLosMesh({
   }
 
   const mk = new THREE.Mesh(
-    new THREE.SphereGeometry(planeSize * 0.002, 12, 8),
+    new THREE.SphereGeometry(planeSize * 0.0005, 12, 8),
     new THREE.MeshBasicMaterial({ color: 0xffff00, depthTest: false })
   );
   mk.position.copy(eyePt);

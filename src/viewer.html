@@ -114,6 +114,57 @@
     border-radius: 8px; padding: 10px 6px;
     transition: transform 2s cubic-bezier(0.22, 1, 0.36, 1), opacity 2s ease, filter 2s ease;
   }
+
+  #sun-widget {
+    position: fixed;
+    left: 12px;
+    top: 84px;
+    z-index: 11;
+    width: 148px;
+    background: rgba(10, 18, 36, 0.92);
+    border: 1px solid #1e3a5f;
+    border-radius: 10px;
+    padding: 8px 8px 10px;
+    transition: left 2s cubic-bezier(0.22, 1, 0.36, 1), opacity 2s ease, filter 2s ease;
+  }
+  #sun-widget.shifted { left: 292px; }
+  #sun-title {
+    font-size: 10px;
+    color: #7fb4ff;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  #sun-hemisphere {
+    width: 100%;
+    height: 74px;
+    border-radius: 8px;
+    display: block;
+    background: linear-gradient(180deg, rgba(28, 51, 82, 0.65), rgba(15, 27, 45, 0.78));
+    border: 1px solid #27466d;
+    cursor: crosshair;
+  }
+  #sun-strength-row {
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  #sun-strength-row span {
+    font-size: 10px;
+    color: #7fa0c8;
+    white-space: nowrap;
+  }
+  #sl-sun-strength {
+    width: 100%;
+    accent-color: #ffb347;
+  }
+  #sun-values {
+    margin-top: 4px;
+    font-size: 10px;
+    color: #86a6cb;
+    text-align: right;
+  }
   #zoom-bar .zoom-label { font-size: 14px; color: #4dabf7; font-weight: 700; user-select: none; }
   #zoom-bar input[type="range"] {
     writing-mode: vertical-lr;
@@ -239,7 +290,8 @@
   }
   body:not(.ui-ready) #zoom-bar,
   body:not(.ui-ready) #tool-bar,
-  body:not(.ui-ready) #gpu-badge {
+  body:not(.ui-ready) #gpu-badge,
+  body:not(.ui-ready) #sun-widget {
     transform: translateX(36px);
     opacity: 0;
     filter: brightness(0.55) saturate(0.45);
@@ -249,7 +301,8 @@
   body.ui-ready #toggle-panel,
   body.ui-ready #zoom-bar,
   body.ui-ready #tool-bar,
-  body.ui-ready #gpu-badge {
+  body.ui-ready #gpu-badge,
+  body.ui-ready #sun-widget {
     opacity: 1;
     filter: none;
     pointer-events: auto;
@@ -511,6 +564,15 @@
   <div class="zoom-label">+</div>
   <input type="range" id="sl-zoom" min="0" max="100" value="50" orient="vertical">
   <div class="zoom-label">&minus;</div>
+</div>
+<div id="sun-widget" title="Live sun controls">
+  <div id="sun-title">Sun</div>
+  <canvas id="sun-hemisphere" width="136" height="78"></canvas>
+  <div id="sun-strength-row">
+    <span>Strength</span>
+    <input type="range" id="sl-sun-strength" min="0" max="100" value="50">
+  </div>
+  <div id="sun-values">Az 30° · El 50° · Str 0.50</div>
 </div>
 <div id="hover-coords"></div>
 <div id="tile-lc-popup"></div>

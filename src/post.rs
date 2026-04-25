@@ -170,7 +170,10 @@ pub fn build_tile_grid(
 }
 
 pub fn build_heightmap_fallback(viewer_dir: &Path) -> Result<Value> {
-    let colormap = viewer_dir.join("colormap.png");
+    let colormap = {
+        let jpg = viewer_dir.join("colormap.jpg");
+        if jpg.exists() { jpg } else { viewer_dir.join("colormap.png") }
+    };
     let normalmap = viewer_dir.join("normalmap.png");
     let out = viewer_dir.join("heightmap.png");
 
@@ -232,7 +235,10 @@ pub fn build_terrain_paint_fallback(viewer_dir: &Path) -> Result<Option<Value>> 
 
 fn build_terrain_paint_fallback_impl(viewer_dir: &Path, prefer_colormap: bool) -> Result<Option<Value>> {
     let tile_grid = viewer_dir.join("tile_grid.png");
-    let colormap = viewer_dir.join("colormap.png");
+    let colormap = {
+        let jpg = viewer_dir.join("colormap.jpg");
+        if jpg.exists() { jpg } else { viewer_dir.join("colormap.png") }
+    };
     let out = viewer_dir.join("terrain_paint.png");
     let thumb_path = viewer_dir.join("terrain_paint_thumb.png");
 

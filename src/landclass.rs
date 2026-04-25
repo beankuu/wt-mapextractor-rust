@@ -432,18 +432,3 @@ pub fn extract_landclass_native(data: &[u8]) -> Result<Option<Value>> {
     })))
 }
 
-/// Return the raw detailData region (BLK name-map + property data) for
-/// debugging. This is the same byte range `extract_landclass_native` feeds
-/// into `parse_detail_blk`.
-pub fn extract_detail_data(data: &[u8]) -> Option<Vec<u8>> {
-    let hdr = parse_lndm_header(data)?;
-    if hdr.detail_data_ofs <= 0 || hdr.tile_data_ofs <= hdr.detail_data_ofs {
-        return None;
-    }
-    let a = hdr.base_ofs + hdr.detail_data_ofs as usize;
-    let b = (hdr.base_ofs + hdr.tile_data_ofs as usize).min(data.len());
-    if a >= b || b - a < 16 {
-        return None;
-    }
-    Some(data[a..b].to_vec())
-}

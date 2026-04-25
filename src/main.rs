@@ -4,7 +4,6 @@ mod dxp_index;
 mod export;
 mod extract;
 mod heightmap;
-mod inspect;
 mod landclass;
 mod missions;
 mod paint;
@@ -26,7 +25,6 @@ use crate::util::set_oodle_dll_path;
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let serve = !cli.no_serve;
-    let will_build = cli.all || !cli.maps.is_empty() || (!serve && !cli.inspect);
 
     let cfg = AppConfig::load(".")?;
     // Register oo2core DLL path with the decompressor before any map processing.
@@ -34,36 +32,17 @@ fn main() -> Result<()> {
     let pipe = Pipeline::new(cfg.clone());
 
     let opts = BuildOptions {
-        local_output: cli.local,
-        export_mat: cli.mat || cli.debug || will_build,
-        // Preconverting the shared material cache decodes every DxP pack in
-        // the datamine (tens of GB of RAM/disk). Only do it when the user
-        // explicitly passes --preconvert-mat. `--mat` / `--debug` / `--all`
-        // now rely on the per-map streaming extraction path.
-        preconvert_mat: cli.preconvert_mat,
-        export_thumbs: cli.thumbs || cli.debug,
+        export_mat: cli.mat,
+        export_thumbs: cli.thumbs,
         clean_maps_on_all: true,
-        skip_tile_grid: cli.fast || cli.skip_tile_grid,
-        skip_rendinst: cli.fast || cli.skip_rendinst,
+        skip_tile_grid: cli.fast,
+        skip_rendinst: cli.fast,
         compress_maps: !cli.no_compress_map,
-        sun_azimuth: cli.sun_azimuth,
-        sun_elevation: cli.sun_elevation,
-        sun_strength: cli.sun_strength,
-        debug: cli.debug,
+        // Fixed bake-time sun; live user controls are handled in the viewer UI.
+        sun_azimuth: 30.0,
+        sun_elevation: 50.0,
+        sun_strength: 0.5,
     };
-
-    if cli.inspect {
-        if cli.maps.is_empty() {
-            anyhow::bail!("--inspect requires at least one map name, e.g. `--inspect air_israel avg_japan`");
-        }
-        for map in &cli.maps {
-            match pipe.inspect_map(map) {
-                Ok(path) => println!("Wrote {}", path.display()),
-                Err(e) => eprintln!("  ! inspect failed for {map}: {e:#}"),
-            }
-        }
-        return Ok(());
-    }
 
     if cli.all {
         // build_all returns Err if any maps failed; still run serve afterwards
@@ -76,20 +55,12 @@ fn main() -> Result<()> {
             build_result?;
         }
     } else if !cli.maps.is_empty() {
-        if opts.export_mat && opts.preconvert_mat {
-            pipe.preconvert_shared_materials(true)
-                .context("Failed preconverting materials")?;
-        }
         for map in &cli.maps {
             pipe.build_one(Some(map), &opts)
                 .with_context(|| format!("Failed building map '{map}'"))?;
         }
     } else if !serve {
         // No --all, no map names, --no-serve → auto-detect from for_test/levels
-        if opts.export_mat && opts.preconvert_mat {
-            pipe.preconvert_shared_materials(true)
-                .context("Failed preconverting materials")?;
-        }
         pipe.build_one(None, &opts)?;
     }
 

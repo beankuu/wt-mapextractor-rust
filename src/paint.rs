@@ -13,11 +13,11 @@ use crate::post::parse_lndm_grid;
 use crate::util::{decode_dds_bytes, read_i32_le, read_u32_le};
 
 /// JPEG quality used for all terrain paint outputs (0-100).
-const JPEG_QUALITY: u8 = 92;
+const JPEG_QUALITY: u8 = 84;
 
 fn save_rgb_image(img: &RgbImage, path: &Path, compress: bool) -> Result<()> {
     if compress {
-        // Save as JPEG (compressed)
+        // Save as JPEG (compressed output path).
         let f = std::fs::File::create(path)
             .with_context(|| format!("Failed to create {}", path.display()))?;
         let mut enc = JpegEncoder::new_with_quality(std::io::BufWriter::new(f), JPEG_QUALITY);
@@ -31,7 +31,7 @@ fn save_rgb_image(img: &RgbImage, path: &Path, compress: bool) -> Result<()> {
     Ok(())
 }
 
-/// World extent of the HM2 detail region, used to crop terrain_paint_detail.jpg.
+/// World extent of the HM2 detail region, used to crop terrain_paint_detail output.
 pub struct Hm2ExtentForPaint {
     pub world_x0: f64,
     pub world_z0: f64,
@@ -172,7 +172,10 @@ fn apply_water_mask(
         // For pseudo heightmaps (e.g. built from colormap), height thresholds
         // are meaningless. Derive ocean from the colormap blue-dominance
         // (typical satellite-imagery ocean detector).
-        let colormap = viewer_dir.join("colormap.png");
+        let colormap = {
+            let jpg = viewer_dir.join("colormap.jpg");
+            if jpg.exists() { jpg } else { viewer_dir.join("colormap.png") }
+        };
         if !colormap.exists() || params.water_level.is_none() {
             return;
         }
@@ -1276,7 +1279,7 @@ pub fn build_terrain_paint_native(
     // shown in 2D map cards where users expect north-up (row 0 of the image
     // = world north). Our internal float/PNG frame has pixel (0,0) = world
     // SW, so flip the thumbnail vertically at save-time (east stays on the
-    // right). This is isolated to the thumb; full terrain_paint.jpg stays 1:1.
+    // right). This is isolated to the thumb; full terrain_paint output stays 1:1.
     imageops::flip_vertical_in_place(&mut thumb);
     let thumb_out = if compress_maps {
         viewer_dir.join("terrain_paint_thumb.jpg")
@@ -1286,7 +1289,7 @@ pub fn build_terrain_paint_native(
     save_rgb_image(&thumb, &thumb_out, compress_maps)
         .with_context(|| format!("Failed to save {}", thumb_out.display()))?;
 
-    // terrain_paint_detail.jpg — HM2-region crop upsampled to 4096×4096
+    // terrain_paint_detail output — HM2-region crop upsampled to 4096×4096
     let mut detail_info: Value = Value::Null;
     if let Some(hm2) = hm2_for_detail {
         // Get canvas world extent from the lndm grid header
@@ -1312,11 +1315,15 @@ pub fn build_terrain_paint_native(
                     const DETAIL_SZ: u32 = 4096;
                     let cropped = imageops::crop_imm(&canvas, px0, pz0, crop_w, crop_h).to_image();
                     let detail_img = imageops::resize(&cropped, DETAIL_SZ, DETAIL_SZ, imageops::FilterType::Lanczos3);
-                    let det_path = viewer_dir.join("terrain_paint_detail.jpg");
+                    let det_path = if compress_maps {
+                        viewer_dir.join("terrain_paint_detail.jpg")
+                    } else {
+                        viewer_dir.join("terrain_paint_detail.png")
+                    };
                     save_rgb_image(&detail_img, &det_path, compress_maps)
                         .with_context(|| format!("Failed to save {}", det_path.display()))?;
                     detail_info = json!({
-                        "file": "terrain_paint_detail.jpg",
+                        "file": if compress_maps { "terrain_paint_detail.jpg" } else { "terrain_paint_detail.png" },
                         "width": DETAIL_SZ,
                         "height": DETAIL_SZ,
                         "hasAlpha": false,

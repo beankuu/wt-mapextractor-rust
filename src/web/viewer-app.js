@@ -16,9 +16,11 @@ async function init() {
     document.body.classList.add('ui-ready');
     const panel = document.getElementById('panel');
     const toggleBtn = document.getElementById('toggle-panel');
+    const sunWidget = document.getElementById('sun-widget');
     if (panel && panel.classList.contains('collapsed')) {
       panel.classList.remove('collapsed');
       if (toggleBtn) toggleBtn.classList.add('shifted');
+      if (sunWidget) sunWidget.classList.add('shifted');
     }
     S.needsRender = true;
   }, { once: true });

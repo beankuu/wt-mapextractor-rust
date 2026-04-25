@@ -193,10 +193,39 @@ function _sampleHeightAtWorld(wx, wz) {
   return hMin + (S.hmPixelData[(py * S.hmPixelW + px) * 4] / 255) * hRange;
 }
 
+function _makeWorldToSceneProjector(M, planeSize, hMin, hRange) {
+  return (wx, wz, hM) => {
+    const sp = worldToSceneXZ(M, wx, wz, planeSize);
+    let sy = 0;
+    if (S.displacedMeshes.length > 0) {
+      const cs = S.displacedMeshes[0].material.displacementScale || 1;
+      sy = ((hM - hMin) / hRange) * cs;
+    }
+    return new THREE.Vector3(sp.x, sy, sp.z);
+  };
+}
+
+function _addLosRangeCircle(origW, w2s) {
+  const cPts = [];
+  for (let i = 0; i <= 64; i++) {
+    const a = (i / 64) * Math.PI * 2;
+    const cwx = origW.x + Math.cos(a) * _LOS_RANGE;
+    const cwz = origW.z + Math.sin(a) * _LOS_RANGE;
+    const cp = w2s(cwx, cwz, _sampleHeightAtWorld(cwx, cwz));
+    cp.y += 1;
+    cPts.push(cp);
+  }
+  const cLine = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(cPts),
+    new THREE.LineBasicMaterial({ color: 0xffff88, depthTest: false, transparent: true, opacity: 0.5 })
+  );
+  cLine.renderOrder = 5000;
+  S.losGroup.add(cLine);
+}
+
 async function _gpuDoLoS(originScene) {
   const M = S.M;
   if (!S.gpuDevice || !S.gpuHmBuf || !M || !M.heightmap) return false;
-  const t0 = performance.now();
   _gpuEnsureLosPipeline();
 
   const planeSize = Math.max(M.mapSize[0], M.mapSize[1]);
@@ -261,15 +290,7 @@ async function _gpuDoLoS(originScene) {
   paramBuf.destroy(); outBuf.destroy(); stageBuf.destroy();
   if (occBufForBind !== S.gpuOccBuf) occBufForBind.destroy();
 
-  function w2s(wx, wz, hM) {
-    const sp = worldToSceneXZ(M, wx, wz, planeSize);
-    let sy = 0;
-    if (S.displacedMeshes.length > 0) {
-      const cs = S.displacedMeshes[0].material.displacementScale || 1;
-      sy = ((hM - hMin) / hRange) * cs;
-    }
-    return new THREE.Vector3(sp.x, sy, sp.z);
-  }
+  const w2s = _makeWorldToSceneProjector(M, planeSize, hMin, hRange);
 
   const NRAYS = _GPU_LOS_RAYS, NSTEPS = _GPU_LOS_STEPS;
   const gridPos = new Float32Array(NRAYS * NSTEPS * 3);
@@ -298,21 +319,7 @@ async function _gpuDoLoS(originScene) {
     waterY: S.waterMesh ? S.waterMesh.position.y : null,
   });
 
-  // Range circle
-  const cPts = [];
-  for (let i = 0; i <= 64; i++) {
-    const a = (i / 64) * Math.PI * 2;
-    const cwx = origW.x + Math.cos(a) * _LOS_RANGE;
-    const cwz = origW.z + Math.sin(a) * _LOS_RANGE;
-    const cp = w2s(cwx, cwz, _sampleHeightAtWorld(cwx, cwz));
-    cp.y += 1; cPts.push(cp);
-  }
-  const cLine = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints(cPts),
-    new THREE.LineBasicMaterial({ color: 0xffff88, depthTest: false, transparent: true, opacity: 0.5 })
-  );
-  cLine.renderOrder = 5000;
-  S.losGroup.add(cLine);
+  _addLosRangeCircle(origW, w2s);
 
   S.scene.add(S.losGroup);
   if (typeof S.needsRender !== 'undefined') S.needsRender = true;
@@ -331,7 +338,6 @@ export function clearLoS() {
 // CPU fallback LoS: 360 rays × 375 steps at 4 m/step (1500 m range)
 function _cpuDoLoS(originScene) {
   const M = S.M;
-  const t0 = performance.now();
   const planeSize = Math.max(M.mapSize[0], M.mapSize[1]);
   const hMin = M.heightmap.height_min_m, hMax = M.heightmap.height_max_m;
   const hRange = (hMax - hMin) || 1;
@@ -343,15 +349,7 @@ function _cpuDoLoS(originScene) {
   const CPU_STEPS = Math.max(1, Math.floor(_LOS_RANGE / CPU_STEP_M));
   const hasOcc = !!(S.occGrid && S.occGridW > 0 && S.occGridH > 0 && S.occGridCellSize > 0);
 
-  function w2s(wx, wz, hM) {
-    const sp = worldToSceneXZ(M, wx, wz, planeSize);
-    let sy = 0;
-    if (S.displacedMeshes.length > 0) {
-      const cs = S.displacedMeshes[0].material.displacementScale || 1;
-      sy = ((hM - hMin) / hRange) * cs;
-    }
-    return new THREE.Vector3(sp.x, sy, sp.z);
-  }
+  const w2s = _makeWorldToSceneProjector(M, planeSize, hMin, hRange);
 
   const NRAYS = CPU_RAYS, NSTEPS = CPU_STEPS;
   const gridPos = new Float32Array(NRAYS * NSTEPS * 3);
@@ -405,21 +403,7 @@ function _cpuDoLoS(originScene) {
 
   buildLosMesh({ THREE, group: S.losGroup, gridPos, gridVis, nRays: NRAYS, nSteps: NSTEPS, eyePt: eyePtW, planeSize, waterY: S.waterMesh ? S.waterMesh.position.y : null });
 
-  // Range circle
-  const cPts = [];
-  for (let i = 0; i <= 64; i++) {
-    const a = (i / 64) * Math.PI * 2;
-    const cwx = origW.x + Math.cos(a) * _LOS_RANGE;
-    const cwz = origW.z + Math.sin(a) * _LOS_RANGE;
-    const cp = w2s(cwx, cwz, _sampleHeightAtWorld(cwx, cwz));
-    cp.y += 1; cPts.push(cp);
-  }
-  const cLine = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints(cPts),
-    new THREE.LineBasicMaterial({ color: 0xffff88, depthTest: false, transparent: true, opacity: 0.5 })
-  );
-  cLine.renderOrder = 5000;
-  S.losGroup.add(cLine);
+  _addLosRangeCircle(origW, w2s);
 
   S.scene.add(S.losGroup);
   if (typeof S.needsRender !== 'undefined') S.needsRender = true;

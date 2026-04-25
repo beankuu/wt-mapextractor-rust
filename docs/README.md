@@ -1,12 +1,8 @@
 # Documentation Index
 
 Start here: [**BIN_FORMAT.md**](BIN_FORMAT.md) — the reverse-engineered
-layout of a War Thunder `.bin` level container. Generated inspect reports
-live under `maps/<name>/inspect.txt`; regenerate any time with:
-
-```
-wt-map-extractor --inspect --no-serve air_israel avg_japan
-```
+layout of a War Thunder `.bin` level container. Inspect reports referenced
+in docs are static examples committed for format analysis.
 
 ## Reference
 

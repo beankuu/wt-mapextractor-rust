@@ -174,10 +174,11 @@ async function lazyLoadDetailHeightmap(params) {
           : (M.colormap ? M.colormap.file : null));
     const usesDetailPatchColor = !!(detailPaint && detailColorSrc === detailPaint.file);
     
-    const [detailTex, detailColorRaw] = await Promise.all([
-      getCachedTexturePromise('detailHeightmap', `${DATA}/${D.file}`),
+    const [detailTexPng, detailColorRaw] = await Promise.all([
+      getCachedTexturePromise('detailHeightmapPng', `${DATA}/${D.file}`),
       detailColorSrc ? getCachedTexturePromise('detailColor', `${DATA}/${detailColorSrc}`) : null,
     ]);
+    const detailTex = detailTexPng;
     
     if (!detailTex) {
       console.warn('Detail heightmap failed to load');

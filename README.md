@@ -66,12 +66,6 @@ $env:WT_WORKERS="16"; cargo run --release -- --all
 ### Useful flags
 
 ```powershell
-# write to ./viewer_data/ instead of maps/<name>/
-cargo run --release -- iwo_jima --local
-
-# sun direction & strength used by the colormap shading
-cargo run --release -- iwo_jima --sun-azimuth 30 --sun-elevation 30 --sun-strength 0.7
-
 # export per-material textures to mat/
 cargo run --release -- iwo_jima --mat
 
@@ -83,9 +77,6 @@ cargo run --release -- iwo_jima --no-serve
 
 # fast mode: skip tile-grid and rendinst stages
 cargo run --release -- iwo_jima --fast
-
-# dump every known structure in a .bin plus hex of unknown regions
-cargo run --release -- --inspect --no-serve air_israel avg_japan
 ```
 
 See `cargo run --release -- --help` for the full flag list.
@@ -130,7 +121,8 @@ Also required at runtime: `src/oo2core_9_win64.dll` (or `OODLE_DLL`).
    to landclass indices via `detTexIds`.
 2. **Landclass definitions** parsed from Dagor BLK binary — base
    texture, detail textures (R/G/B/K), tiling sizes.
-3. **Native weight blend** in Rust produces `terrain_paint.png`.
+3. **Native weight blend** in Rust produces `terrain_paint.webp` by default
+  (PNG when `--no-compress-map` is used).
 4. **Parallel tile processing** uses Rayon to scale across cores.
 
 ### Batch mode (`--all`)
@@ -167,6 +159,7 @@ Open `src/viewer.html` (or omit `--no-serve`). Highlights:
 - Mission overlay — spawn points, capture zones, battle areas
 - Optional WebGPU line-of-sight (720 rays × 400 steps) with CPU fallback
 - HM2 detail mesh on top of the base heightmap
+- Floating live sun widget (azimuth/elevation dome + strength slider)
 - Batch gallery (`src/index.html`) for `--all` builds
 
 ## Standalone in-game-map tool
@@ -196,7 +189,6 @@ src/
   landclass.rs        - Dagor BLK landclass parser
   paint.rs            - terrain paint compositing
   rendinst.rs         - RIGz render-instance extraction
-  inspect.rs          - `--inspect` structural dumper
   missions.rs         - mission BLK parser (spawns / zones)
   post.rs             - manifest + post-processing
   progress.rs         - batch progress / ETA rendering
@@ -210,7 +202,6 @@ src/
 config.json           - datamine + client paths (gitignored)
 config.sample.json    - example configuration
 maps/                 - output (default): per-map directories (gitignored)
-viewer_data/          - output (--local mode, gitignored)
 docs/                 - technical documentation (formats, pipeline, issues)
 ingame_map/           - standalone tactical-map renderer (gitignored)
 ```
