@@ -5,6 +5,7 @@ import { applySunSettings } from './scene-setup.js';
 import { initWebGPU, gpuUploadHeightmaps } from './webgpu-los.js';
 import { getRendInstStyle, isStructureOccluder } from './tools/rendinst-style.js';
 import { getMapFrame, sceneToWorldXZ, worldToSceneXZ } from './coords.js';
+import { playTerrainIntro, playMeshIntro } from './intro-anim.js';
 
 // Lazy loading cache for TIER 3+ textures
 const lazyTextureCache = new Map();
@@ -269,6 +270,18 @@ async function lazyLoadDetailHeightmap(params) {
     // Tag mesh so setHeightScale uses HM2 scale/bias, not LR full-range.
     if (params.hm2Meta) {
       S.detailTexMesh.userData.hm2 = params.hm2Meta;
+    }
+    // Prevent HM2 patch from visually popping early. Keep it hidden until
+    // the main terrain intro is complete.
+    if (!S.terrainIntroDone) {
+      S.detailTexMesh.visible = false;
+      const _showDetailAfterIntro = () => {
+        if (S.detailTexMesh) {
+          S.detailTexMesh.visible = true;
+          S.needsRender = true;
+        }
+      };
+      window.addEventListener('terrain-intro-complete', _showDetailAfterIntro, { once: true });
     }
     S.scene.add(S.detailTexMesh);
     S.displacedMeshes.push(S.detailTexMesh);
@@ -599,6 +612,8 @@ export async function loadTerrain() {
     S.tankZoneMesh.add(tzSolid);
     S.tankZoneMesh.renderOrder = 999;
     S.tankZoneMesh.userData = { x0, x1, z0, z1, yBotFrac, yTopFrac };
+    // Keep hidden until intro animation reveals it.
+    S.tankZoneMesh.visible = false;
     S.scene.add(S.tankZoneMesh);
   }
 
@@ -812,11 +827,17 @@ export async function loadTerrain() {
         S.rendinstGroup.add(mesh);
       }
 
+      S.rendinstGroup.visible = false;
       S.scene.add(S.rendinstGroup);
     } catch (e) {
       console.warn('RendInst load failed:', e);
     }
   }
+
+  // Animate the visible terrain meshes in (radial wireframe expansion ->
+  // radial texture expansion -> water/object reveal). This runs after
+  // tank zone + objects are created so they can stay hidden from frame 0.
+  playTerrainIntro([S.tileGridMesh, S.terrainMesh].filter(Boolean));
 
   // -- Tile hover highlight --
   {

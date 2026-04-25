@@ -94,9 +94,17 @@ fn main() -> Result<()> {
     }
 
     if serve {
-        let url = "http://127.0.0.1:8000";
+        // If specific map(s) were built, jump straight to the first one's
+        // viewer page instead of the index. Otherwise (--all, or no args)
+        // open the index so the user can pick a map.
+        let base = "http://127.0.0.1:8000";
+        let url = if !cli.all && !cli.maps.is_empty() {
+            format!("{}/src/viewer.html?map={}", base, cli.maps[0])
+        } else {
+            base.to_string()
+        };
         println!("Opening browser at {}", url);
-        let _ = webbrowser::open(url);
+        let _ = webbrowser::open(&url);
         server::serve(&cfg.project_root, "127.0.0.1:8000")?;
     }
 

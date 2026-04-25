@@ -15,7 +15,8 @@
     position: fixed; top: 0; left: 0; width: 280px; height: 100vh;
     background: rgba(10, 18, 36, 0.95); backdrop-filter: blur(8px);
     border-right: 1px solid #1e3a5f; overflow-y: auto; z-index: 10;
-    padding: 16px; transition: transform 0.3s;
+    padding: 16px;
+    transition: transform 2s cubic-bezier(0.22, 1, 0.36, 1), opacity 2s ease;
   }
   #panel.collapsed { transform: translateX(-280px); }
   #panel h1 { font-size: 16px; color: #4dabf7; margin-bottom: 4px; }
@@ -72,7 +73,8 @@
     position: fixed; top: 10px; left: 10px; z-index: 11;
     background: rgba(10, 18, 36, 0.9); border: 1px solid #1e3a5f;
     color: #4dabf7; padding: 6px 10px; border-radius: 6px; cursor: pointer;
-    font-size: 18px; line-height: 1; transition: left 0.3s;
+    font-size: 18px; line-height: 1;
+    transition: left 2s cubic-bezier(0.22, 1, 0.36, 1), opacity 2s ease, filter 2s ease;
   }
   #toggle-panel.shifted { left: 292px; }
 
@@ -110,6 +112,7 @@
     z-index: 10; display: flex; flex-direction: column; align-items: center;
     gap: 6px; background: rgba(10, 18, 36, 0.9); border: 1px solid #1e3a5f;
     border-radius: 8px; padding: 10px 6px;
+    transition: transform 2s cubic-bezier(0.22, 1, 0.36, 1), opacity 2s ease, filter 2s ease;
   }
   #zoom-bar .zoom-label { font-size: 14px; color: #4dabf7; font-weight: 700; user-select: none; }
   #zoom-bar input[type="range"] {
@@ -150,14 +153,16 @@
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 16px; font-size: 14px; color: #667;
   }
-  .spinner {
-    width: 40px; height: 40px; border: 3px solid #1e3a5f;
-    border-top-color: #4dabf7; border-radius: 50%;
-    animation: spin 0.8s linear infinite;
+  #loading-canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    pointer-events: none; opacity: 0.55;
   }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  #loading-foreground {
+    position: relative; z-index: 1;
+    display: flex; flex-direction: column; align-items: center; gap: 16px;
+  }
   .progress { width: 220px; height: 4px; background: #1e3a5f; border-radius: 2px; }
-  .progress-fill { height: 100%; background: #4dabf7; border-radius: 2px; transition: width 0.15s; }
+  .progress-fill { height: 100%; background: #ff3aa0; border-radius: 2px; transition: width 0.15s; }
 
   #lc-tooltip {
     display: none; position: fixed; left: 292px; width: 260px;
@@ -189,6 +194,7 @@
   #tool-bar {
     position: fixed; bottom: 40px; right: 16px; z-index: 11;
     display: flex; flex-direction: column; gap: 6px;
+    transition: transform 2s cubic-bezier(0.22, 1, 0.36, 1), opacity 2s ease, filter 2s ease;
   }
   .tool-btn {
     width: 38px; height: 38px; border-radius: 8px;
@@ -215,9 +221,39 @@
     font-size: 10px; padding: 3px 8px; border-radius: 4px;
     border: 1px solid #1e3a5f; background: rgba(10, 18, 36, 0.9);
     color: #556; pointer-events: none; font-family: 'Segoe UI', system-ui, sans-serif;
-    transition: color 0.3s, border-color 0.3s;
+    transition: color 0.3s, border-color 0.3s, transform 2s cubic-bezier(0.22, 1, 0.36, 1), opacity 2s ease, filter 2s ease;
   }
   #gpu-badge.active { color: #2dd4bf; border-color: #2dd4bf; }
+
+  /* Pre-ready UI state: hidden until 3D objects are loaded. */
+  body:not(.ui-ready) #panel {
+    transform: translateX(-320px) !important;
+    opacity: 0;
+    pointer-events: none;
+  }
+  body:not(.ui-ready) #toggle-panel {
+    transform: translateX(-28px);
+    opacity: 0;
+    filter: brightness(0.55) saturate(0.45);
+    pointer-events: none;
+  }
+  body:not(.ui-ready) #zoom-bar,
+  body:not(.ui-ready) #tool-bar,
+  body:not(.ui-ready) #gpu-badge {
+    transform: translateX(36px);
+    opacity: 0;
+    filter: brightness(0.55) saturate(0.45);
+    pointer-events: none;
+  }
+  body.ui-ready #panel,
+  body.ui-ready #toggle-panel,
+  body.ui-ready #zoom-bar,
+  body.ui-ready #tool-bar,
+  body.ui-ready #gpu-badge {
+    opacity: 1;
+    filter: none;
+    pointer-events: auto;
+  }
 
   /* Mission UI */
   #missions-section { display: none; }
@@ -277,15 +313,107 @@
 <body>
 
 <div id="loading">
-  <div class="spinner"></div>
-  <div id="load-text">Loading map data...</div>
-  <div class="progress"><div class="progress-fill" id="progress-bar"></div></div>
+  <canvas id="loading-canvas"></canvas>
+  <div id="loading-foreground">
+    <div id="load-text" style="font-size:13px;color:#ff7fd0;letter-spacing:1px">Loading map data...</div>
+    <div class="progress"><div class="progress-fill" id="progress-bar"></div></div>
+  </div>
 </div>
+<script>
+// Animated wireframe on the loading screen.
+(function() {
+  const canvas = document.getElementById('loading-canvas');
+  const ctx = canvas.getContext('2d');
+  let t = 0;
+  let raf;
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  function draw() {
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    const COLS = 28, ROWS = 18;
+    const cellW = W / COLS, cellH = H / ROWS;
+
+    // Diagonal wave from top-left -> bottom-right while loading.
+    const diag = (t * 0.38) % (COLS + ROWS + 4) - 2;
+
+    for (let row = 0; row <= ROWS; row++) {
+      for (let col = 0; col <= COLS; col++) {
+        const d = col + (ROWS - row);
+        const dist = d - diag;
+        const settled = Math.max(0, Math.min(1, (diag - d + 0.8) / 0.8));
+        const cresting = Math.exp(-dist * dist * 1.8);
+        const shake = Math.sin(t * 22 + col * 2.3 + row * 1.7) * cresting * 18;
+
+        const baseY = row * cellH;
+        // Simulate heightmap: settled vertices get a "terrain" offset.
+        const hx = Math.sin(col * 0.6 + row * 0.4) * 28 + Math.sin(col * 0.2 + row * 0.9) * 18;
+        const vy = baseY - hx * settled + shake;
+
+        if (col < COLS && row < ROWS) {
+          // Fill each cell with a near-black colour.
+          ctx.fillStyle = 'rgba(8, 3, 15, 0.55)';
+          const x0 = col * cellW, y0 = row * cellH;
+          ctx.fillRect(x0, y0, cellW, cellH);
+        }
+
+        // Horizontal line to right neighbour.
+        if (col < COLS && row <= ROWS) {
+          const dR = (col + 1) + (ROWS - row);
+          const settledR = Math.max(0, Math.min(1, (diag - dR + 0.8) / 0.8));
+          const crestR   = Math.exp(-(dR - diag) * (dR - diag) * 1.8);
+          const shakeR   = Math.sin(t * 22 + (col+1) * 2.3 + row * 1.7) * crestR * 18;
+          const hxR = Math.sin((col+1) * 0.6 + row * 0.4) * 28 + Math.sin((col+1) * 0.2 + row * 0.9) * 18;
+          const vyR = baseY - hxR * settledR + shakeR;
+          const alpha = Math.max(settled, settledR, cresting * 0.9 + 0.05);
+          ctx.beginPath();
+          ctx.moveTo(col * cellW, vy);
+          ctx.lineTo((col + 1) * cellW, vyR);
+          ctx.strokeStyle = `rgba(255, 58, 160, ${(0.15 + alpha * 0.7).toFixed(2)})`;
+          ctx.lineWidth = cresting > 0.5 ? 2 : 1;
+          ctx.stroke();
+        }
+        // Vertical line to bottom neighbour.
+        if (row < ROWS && col <= COLS) {
+          const dB = col + (ROWS - (row + 1));
+          const settledB = Math.max(0, Math.min(1, (diag - dB + 0.8) / 0.8));
+          const crestB   = Math.exp(-(dB - diag) * (dB - diag) * 1.8);
+          const shakeB   = Math.sin(t * 22 + col * 2.3 + (row+1) * 1.7) * crestB * 18;
+          const hxB = Math.sin(col * 0.6 + (row+1) * 0.4) * 28 + Math.sin(col * 0.2 + (row+1) * 0.9) * 18;
+          const vyB = (row + 1) * cellH - hxB * settledB + shakeB;
+          const alpha = Math.max(settled, settledB, crestB * 0.9 + 0.05);
+          ctx.beginPath();
+          ctx.moveTo(col * cellW, vy);
+          ctx.lineTo(col * cellW, vyB);
+          ctx.strokeStyle = `rgba(255, 58, 160, ${(0.15 + alpha * 0.7).toFixed(2)})`;
+          ctx.lineWidth = crestB > 0.5 ? 2 : 1;
+          ctx.stroke();
+        }
+      }
+    }
+    t += 0.016;
+    raf = requestAnimationFrame(draw);
+  }
+  draw();
+  // Stop when loading screen is hidden.
+  const obs = new MutationObserver(() => {
+    const el = document.getElementById('loading');
+    if (el && el.style.display === 'none') { cancelAnimationFrame(raf); obs.disconnect(); }
+  });
+  obs.observe(document.getElementById('loading'), { attributes: true, attributeFilter: ['style'] });
+})();
+</script>
 
 <a id="back-btn" href="index.html" title="Back to map list" style="position:fixed;top:10px;right:14px;z-index:11;background:rgba(10,18,36,0.9);border:1px solid #1e3a5f;color:#4dabf7;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:12px;display:none;">&larr; Maps</a>
 <div id="gpu-badge">CPU</div>
-<button id="toggle-panel" class="shifted" title="Toggle panel">&#9776;</button>
-<div id="panel">
+<button id="toggle-panel" title="Toggle panel">&#9776;</button>
+<div id="panel" class="collapsed">
   <h1 id="map-title">Map Viewer</h1>
   <div id="map-head">
     <div id="earth-globe-container" title="Map geolocation">

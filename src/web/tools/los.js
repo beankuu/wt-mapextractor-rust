@@ -16,9 +16,7 @@
 //
 // Output meshes (added to group):
 //   - cyan visible-region surface (0x00ffcc, opacity 0.22)
-//   - magenta frontier band marking the visibility transition
-//     (0xff3388, opacity 0.18, DoubleSide) - only for the first quad
-//     where visibility flips off, and skipped underwater
+//   - magenta occluded-region fill (0xff2b8f), skipped underwater
 //   - yellow eye-position marker sphere
 export function buildLosMesh({
   THREE,
@@ -61,13 +59,12 @@ export function buildLosMesh({
     for (let s = 0; s < nSteps - 1; s++) {
       const a = gp(r, s), b = gp(rn, s);
       const c = gp(r, s + 1), d = gp(rn, s + 1);
-      const visPrev = gv(r, s) && gv(rn, s);
       const vis = gv(r, s + 1) && gv(rn, s + 1);
       if (vis) {
         pushTri(cyanVerts, a, c, b);
         pushTri(cyanVerts, b, c, d);
-      } else if (visPrev && aboveWater(a, b, c, d)) {
-        // Frontier band: only the first quad where visibility drops off.
+      } else if (aboveWater(a, b, c, d)) {
+        // Fill all occluded quads so the pink area is clearly visible.
         pushTri(magVerts, a, c, b);
         pushTri(magVerts, b, c, d);
       }
@@ -91,10 +88,10 @@ export function buildLosMesh({
     geo.setAttribute('position', new THREE.Float32BufferAttribute(magVerts, 3));
     geo.computeVertexNormals();
     const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-      color: 0xff3388, transparent: true, opacity: 0.18,
+      color: 0xff2b8f, transparent: true, opacity: 0.34,
       depthTest: false, depthWrite: false, side: THREE.DoubleSide,
     }));
-    mesh.renderOrder = 5000;
+    mesh.renderOrder = 5002;
     group.add(mesh);
   }
 

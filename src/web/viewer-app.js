@@ -12,6 +12,17 @@ import { updateLoSVisuals } from './webgpu-los.js';
 async function init() {
   setupScene();
 
+  window.addEventListener('terrain-intro-complete', () => {
+    document.body.classList.add('ui-ready');
+    const panel = document.getElementById('panel');
+    const toggleBtn = document.getElementById('toggle-panel');
+    if (panel && panel.classList.contains('collapsed')) {
+      panel.classList.remove('collapsed');
+      if (toggleBtn) toggleBtn.classList.add('shifted');
+    }
+    S.needsRender = true;
+  }, { once: true });
+
   // Mark a render needed whenever the scene changes; also clamp camera above terrain
   S.needsRender = true;
   S.controls.addEventListener('change', () => {
@@ -50,7 +61,9 @@ async function init() {
   setupGizmo();
 
   progress(100, 'Done');
-  setTimeout(() => { document.getElementById('loading').style.display = 'none'; }, 400);
+  setTimeout(() => {
+    document.getElementById('loading').style.display = 'none';
+  }, 400);
 
   animate();
 }
