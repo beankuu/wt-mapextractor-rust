@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>War Thunder Map Viewer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a1628; color: #e0e0e0;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    min-height: 100vh;
+    display: flex; flex-direction: column;
+  }
+
+  header {
+    padding: 24px 24px 12px;
+    text-align: center;
+    border-bottom: 1px solid #1e3a5f;
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 24px; color: #4dabf7; font-weight: 600; }
+  header .subtitle { font-size: 13px; color: #556; margin-top: 4px; }
+
+  .toolbar {
+    display: flex; justify-content: center; gap: 12px;
+    padding: 12px 24px; flex-wrap: wrap;
+    border-bottom: 1px solid #1e3a5f;
+    flex-shrink: 0;
+    position: sticky; top: 0; z-index: 10;
+    background: #0a1628;
+  }
+  .search-box {
+    background: #0f1f35; border: 1px solid #1e3a5f; border-radius: 8px;
+    padding: 8px 14px; color: #e0e0e0; font-size: 13px;
+    width: 320px; outline: none;
+  }
+  .search-box:focus { border-color: #4dabf7; }
+  .filter-btn {
+    background: #0f1f35; border: 1px solid #1e3a5f; border-radius: 8px;
+    padding: 8px 14px; color: #889; font-size: 12px; cursor: pointer;
+  }
+  .filter-btn:hover, .filter-btn.active { border-color: #4dabf7; color: #4dabf7; }
+  .count { font-size: 12px; color: #556; align-self: center; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 260px));
+    align-items: start;
+    gap: 16px;
+    padding: 16px 24px;
+    width: min(2200px, 100%);
+    margin: 0 auto;
+    flex: 1; overflow-y: auto;
+  }
+
+  .card {
+    background: #0f1f35; border: 1px solid #1e3a5f; border-radius: 10px;
+    overflow: hidden; cursor: pointer; transition: transform 0.15s, border-color 0.15s;
+  }
+  .card:hover { transform: translateY(-2px); border-color: #4dabf7; }
+  .card img {
+    width: 100%; aspect-ratio: 1; object-fit: cover;
+    background: #060e1a; display: block;
+  }
+  .card .info {
+    padding: 10px 12px;
+  }
+  .card .name {
+    font-size: 13px; font-weight: 600; color: #c0d0e8;
+    text-transform: capitalize;
+  }
+  .card .meta {
+    font-size: 10px; color: #556; margin-top: 3px;
+  }
+  .card .meta span { color: #778; }
+  .card .badge {
+    display: inline-block; font-size: 9px; padding: 1px 5px;
+    border-radius: 3px; margin-right: 3px; margin-top: 3px;
+  }
+  .badge.lc { background: #1a3a2a; color: #5dba7d; }
+  .badge.mat { background: #3a2a1a; color: #ba8d5d; }
+  .badge.hm { background: #1a2a3a; color: #5d9dba; }
+  .badge.tp { background: #2a1a3a; color: #9d5dba; }
+
+  .badge.cat-avg { background: #1a3a1a; color: #6dba5d; }
+  .badge.cat-air { background: #1a2a3a; color: #5db0f7; }
+  .badge.cat-avn { background: #1a303a; color: #5dbace; }
+  .badge.cat-arcade { background: #3a2a1a; color: #e0a040; }
+  .badge.cat-other { background: #2a2a2a; color: #a0a0a0; }
+
+  .card.cat-avg .info { background: #0e1e14; }
+  .card.cat-air .info { background: #0e1620; }
+  .card.cat-avn .info { background: #0e1a1e; }
+  .card.cat-arcade .info { background: #1e1608; }
+  .card.cat-other .info { background: #161616; }
+
+  .no-results {
+    text-align: center; padding: 60px; color: #556; font-size: 14px;
+  }
+
+  #loading {
+    text-align: center; padding: 80px; color: #556;
+  }
+  .spinner-sm {
+    width: 30px; height: 30px; border: 3px solid #1e3a5f;
+    border-top-color: #4dabf7; border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 0 auto 12px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>War Thunder Map Viewer</h1>
+  <div class="subtitle">Select a map to view in 3D</div>
+</header>
+
+<div class="toolbar">
+  <input type="text" class="search-box" id="search" placeholder="Search maps...">
+  <button class="filter-btn active" data-filter="all">All</button>
+  <button class="filter-btn" data-filter="avg">Ground</button>
+  <button class="filter-btn" data-filter="air">Air</button>
+  <button class="filter-btn" data-filter="avn">Naval</button>
+  <button class="filter-btn" data-filter="arcade">Arcade</button>
+  <button class="filter-btn" data-filter="other">Classic</button>
+  <span class="count" id="count"></span>
+</div>
+
+<div id="loading"><div class="spinner-sm"></div>Loading maps...</div>
+<div class="grid" id="grid"></div>
+
+<script src="web/index-app.js"></script>
+</body>
+</html>

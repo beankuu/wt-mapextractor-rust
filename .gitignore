@@ -1,0 +1,29 @@
+.vscode/
+maps/
+viewer_data/
+config.json
+oo2core*.dll
+
+# Standalone in-game-map renderer (not part of mainstream pipeline)
+ingame_map/
+
+CHANGELOG.md
+
+# agent files
+.agents/
+skills-lock.json
+
+# local envs
+.venv/
+env/
+
+# Rust/target outputs
+target/
+build_*.txt
+debug_out.txt
+extract_out.txt
+pm_error.txt
+
+# common generated docs/site outputs
+docs/_build/
+site/
