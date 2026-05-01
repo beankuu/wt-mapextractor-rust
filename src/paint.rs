@@ -326,11 +326,38 @@ fn blend_cell_seams(canvas: &mut RgbImage, tile_w: u32, tile_h: u32, border: u32
     let inv_border = 1.0f32 / border as f32;
     let radius: i32 = border as i32;
 
-    canvas
-        .as_mut()
-        .par_chunks_mut(3)
-        .enumerate()
-        .for_each(|(idx, o)| {
+    let mut affected: Vec<usize> = Vec::new();
+    let seam_band = border.saturating_sub(1) as i32;
+    let mut seam_x = tile_w;
+    while seam_x < w {
+        let x0 = (seam_x as i32 - seam_band).max(0) as u32;
+        let x1 = (seam_x + border - 1).min(w - 1);
+        for y in 0..h {
+            let row = y as usize * w as usize;
+            for x in x0..=x1 {
+                affected.push(row + x as usize);
+            }
+        }
+        seam_x += tile_w;
+    }
+    let mut seam_y = tile_h;
+    while seam_y < h {
+        let y0 = (seam_y as i32 - seam_band).max(0) as u32;
+        let y1 = (seam_y + border - 1).min(h - 1);
+        for y in y0..=y1 {
+            let row = y as usize * w as usize;
+            for x in 0..w {
+                affected.push(row + x as usize);
+            }
+        }
+        seam_y += tile_h;
+    }
+    affected.sort_unstable();
+    affected.dedup();
+
+    let updates: Vec<(usize, u8, u8, u8)> = affected
+        .par_iter()
+        .filter_map(|&idx| {
             let x = (idx as u32) % w;
             let y = (idx as u32) / w;
             let dx_mod = x % tile_w;
@@ -340,7 +367,7 @@ fn blend_cell_seams(canvas: &mut RgbImage, tile_w: u32, tile_h: u32, border: u32
             let dy_dist = dy_mod.min(tile_h - dy_mod);
             let d = dx_dist.min(dy_dist);
             if d >= border {
-                return;
+                return None;
             }
             // Box-filter sample crossing the seam. Keep the kernel small so
             // total cost is O(border^2) per seam pixel, ~6% of canvas area.
@@ -360,20 +387,33 @@ fn blend_cell_seams(canvas: &mut RgbImage, tile_w: u32, tile_h: u32, border: u32
                 }
             }
             if n == 0 {
-                return;
+                return None;
             }
             let ar = (sr / n) as f32;
             let ag = (sg / n) as f32;
             let ab = (sb / n) as f32;
             // Linear fade: seam center (d=0) = fully blurred, seam edge (d=border) = original.
             let alpha = 1.0 - (d as f32) * inv_border;
-            let orig_r = o[0] as f32;
-            let orig_g = o[1] as f32;
-            let orig_b = o[2] as f32;
-            o[0] = (orig_r + (ar - orig_r) * alpha).round().clamp(0.0, 255.0) as u8;
-            o[1] = (orig_g + (ag - orig_g) * alpha).round().clamp(0.0, 255.0) as u8;
-            o[2] = (orig_b + (ab - orig_b) * alpha).round().clamp(0.0, 255.0) as u8;
-        });
+            let p = idx * 3;
+            let orig_r = src_raw[p] as f32;
+            let orig_g = src_raw[p + 1] as f32;
+            let orig_b = src_raw[p + 2] as f32;
+            Some((
+                idx,
+                (orig_r + (ar - orig_r) * alpha).round().clamp(0.0, 255.0) as u8,
+                (orig_g + (ag - orig_g) * alpha).round().clamp(0.0, 255.0) as u8,
+                (orig_b + (ab - orig_b) * alpha).round().clamp(0.0, 255.0) as u8,
+            ))
+        })
+        .collect();
+
+    let out = canvas.as_mut();
+    for (idx, r, g, b) in updates {
+        let p = idx * 3;
+        out[p] = r;
+        out[p + 1] = g;
+        out[p + 2] = b;
+    }
 }
 
 fn apply_normalmap_lighting(
@@ -772,7 +812,7 @@ fn sample_lc_detail(m: &LcMaterial, gx: u32, gy: u32, detail_idx: usize) -> [u8;
     sample_lc(m, gx, gy)
 }
 
-fn blend_tile(
+fn blend_tile_into(
     tile: &RgbaImage,
     tex2: Option<&RgbaImage>,
     det: [u8; 7],
@@ -782,12 +822,14 @@ fn blend_tile(
     global_y0: u32,
     out_w: u32,
     out_h: u32,
-) -> RgbImage {
+    dest: &mut [u8],
+    dest_stride: usize,
+    dest_x0: usize,
+) {
     let det = det;
     let (src_w, src_h) = tile.dimensions();
     let w = out_w.max(1);
     let h = out_h.max(1);
-    let mut out: RgbImage = ImageBuffer::new(w, h);
 
     // Python: has_alpha = tile_arr[:,:,3].min() < 255
     // Only use the alpha channel as a splatmap weight when it actually carries
@@ -804,8 +846,6 @@ fn blend_tile(
         None => (&[], 0, 0, 0, false),
     };
 
-    let out_raw = out.as_mut();
-    let out_stride = (w * 3) as usize;
     let src_w_max = src_w.saturating_sub(1);
     let src_h_max = src_h.saturating_sub(1);
     let tex2_w_max = tex2_w.saturating_sub(1);
@@ -836,7 +876,6 @@ fn blend_tile(
     for y in 0..h {
         let sy = (((y as f32 + 0.5) * sy_scale) as u32).min(src_h_max) as usize;
         let row_off = sy * tile_stride;
-        let out_row_off = (y as usize) * out_stride;
         let t2_row_off = if !tex2_raw.is_empty() {
             let t2y = (((y as f32 + 0.5) * t2y_scale) as u32).min(tex2_h_max) as usize;
             t2y * tex2_stride
@@ -844,6 +883,7 @@ fn blend_tile(
             0
         };
         let gy = global_y0 + y;
+        let out_row_off = (y as usize) * dest_stride + dest_x0 * 3;
         for x in 0..w {
             let sx = (((x as f32 + 0.5) * sx_scale) as u32).min(src_w_max) as usize;
             let p_off = row_off + sx * 4;
@@ -909,46 +949,50 @@ fn blend_tile(
                 let base_idx = det[0] as usize;
                 if base_idx < lc_len {
                     let c = sample_lc(&lc_mats[base_idx], gx, gy);
-                    out_raw[o_off] = c[0];
-                    out_raw[o_off + 1] = c[1];
-                    out_raw[o_off + 2] = c[2];
+                    dest[o_off] = c[0];
+                    dest[o_off + 1] = c[1];
+                    dest[o_off + 2] = c[2];
                 } else {
-                    out_raw[o_off] = 20;
-                    out_raw[o_off + 1] = 60;
-                    out_raw[o_off + 2] = 120;
+                    dest[o_off] = 20;
+                    dest[o_off + 1] = 60;
+                    dest[o_off + 2] = 120;
                 }
             } else {
-                out_raw[o_off] = (cr / tw).clamp(0, 255) as u8;
-                out_raw[o_off + 1] = (cg / tw).clamp(0, 255) as u8;
-                out_raw[o_off + 2] = (cb / tw).clamp(0, 255) as u8;
+                dest[o_off] = (cr / tw).clamp(0, 255) as u8;
+                dest[o_off + 1] = (cg / tw).clamp(0, 255) as u8;
+                dest[o_off + 2] = (cb / tw).clamp(0, 255) as u8;
             }
         }
     }
-
-    out
 }
 
-fn synth_base_lc_tile(
+fn synth_base_lc_tile_into(
     base_idx: usize,
     lc_mats: &[LcMaterial],
     global_x0: u32,
     global_y0: u32,
     out_w: u32,
     out_h: u32,
-) -> Option<RgbImage> {
+    dest: &mut [u8],
+    dest_stride: usize,
+    dest_x0: usize,
+) -> bool {
     if base_idx >= lc_mats.len() {
-        return None;
+        return false;
     }
     let w = out_w.max(1);
     let h = out_h.max(1);
-    let mut out: RgbImage = ImageBuffer::new(w, h);
     for y in 0..h {
+        let out_row_off = (y as usize) * dest_stride + dest_x0 * 3;
         for x in 0..w {
             let c = sample_lc(&lc_mats[base_idx], global_x0 + x, global_y0 + y);
-            out.put_pixel(x, y, Rgb(c));
+            let o_off = out_row_off + (x as usize) * 3;
+            dest[o_off] = c[0];
+            dest[o_off + 1] = c[1];
+            dest[o_off + 2] = c[2];
         }
     }
-    Some(out)
+    true
 }
 
 pub fn build_terrain_paint_native(
@@ -1128,98 +1172,72 @@ pub fn build_terrain_paint_native(
         }
     }
 
-    // Per-cell tile compositing. Mechanical rule:
-    //   1. If the cell has an authored tile (export_idx is Some) use blend_tile
-    //      to composite the authored image with detail textures from det[].
-    //   2. Otherwise, if the cell has a valid base landclass (det[0] != 0xFF),
-    //      synthesize the tile from that LC texture.
-    //   3. Otherwise, leave the cell unpopulated (canvas keeps its ocean-blue
-    //      init). No per-map branches, no neighbour propagation, no harmonization.
-    let blended_tiles: Vec<(usize, RgbImage)> = cells
-        .par_iter()
-        .enumerate()
-        .filter_map(|(ci, cell)| {
-            let tile_idx = cell.export_idx?;
-            let gx = ci % grid_w;
-            let gy = ci / grid_w;
-            if gy >= grid_h {
-                return None;
-            }
-            let det_s = sanitize_det_indices(cell.det, &ocean_like_lc);
-            let tile_img = tile_set.images.get(&tile_idx)?;
-            let tex2_img = if cell.has_tex2 {
-                tile_set.images.get(&(tile_idx + 1))
-            } else {
-                None
-            };
-            Some((
-                ci,
-                blend_tile(
-                    tile_img,
-                    tex2_img.map(|v| v.as_ref()),
-                    det_s,
-                    &lc_mats,
-                    true,
-                    gx as u32 * tile_w,
-                    gy as u32 * tile_h,
-                    tile_w,
-                    tile_h,
-                ),
-            ))
-        })
-        .collect();
-
     let cell_count = grid_w * grid_h;
-    let mut tile_by_cell: HashMap<usize, RgbImage> = blended_tiles.into_iter().collect();
+    let canvas_stride = canvas.width() as usize * 3;
+    let band_stride = canvas_stride * tile_h as usize;
+    canvas
+        .as_mut()
+        .par_chunks_mut(band_stride)
+        .enumerate()
+        .for_each(|(gy, row_band)| {
+            if gy >= grid_h {
+                return;
+            }
+            for gx in 0..grid_w {
+                let ci = gy * grid_w + gx;
+                if ci >= cell_count {
+                    continue;
+                }
+                let cell = match cells.get(ci) {
+                    Some(v) => v,
+                    None => continue,
+                };
+                let det_s = sanitize_det_indices(cell.det, &ocean_like_lc);
+                let dest_x0 = gx * tile_w as usize;
+                let global_x0 = gx as u32 * tile_w;
+                let global_y0 = gy as u32 * tile_h;
 
+                if let Some(tile_idx) = cell.export_idx {
+                    if let Some(tile_img) = tile_set.images.get(&tile_idx) {
+                        let tex2_img = if cell.has_tex2 {
+                            tile_set.images.get(&(tile_idx + 1))
+                        } else {
+                            None
+                        };
+                        blend_tile_into(
+                            tile_img,
+                            tex2_img.map(|v| v.as_ref()),
+                            det_s,
+                            &lc_mats,
+                            true,
+                            global_x0,
+                            global_y0,
+                            tile_w,
+                            tile_h,
+                            row_band,
+                            canvas_stride,
+                            dest_x0,
+                        );
+                        continue;
+                    }
+                }
 
-    // Fill every cell that has no authored tile but does have a valid base
-    // landclass in det[0] by synthesizing from that LC texture. This is a
-    // direct per-cell lookup — no neighbour cloning, flood-fill, or tonal
-    // harmonization. Cells with det[0] == 0xFF remain blank (ocean-blue
-    // canvas init shows through), which is the correct outcome for true
-    // ocean/void cells.
-    for ci in 0..cell_count {
-        if tile_by_cell.contains_key(&ci) {
-            continue;
-        }
-        let det_s = cells
-            .get(ci)
-            .map(|c| sanitize_det_indices(c.det, &ocean_like_lc))
-            .unwrap_or([0xFF; 7]);
-        let base_idx = det_s[0] as usize;
-        if base_idx == 0xFFusize {
-            continue;
-        }
-        let gx = (ci % grid_w) as u32;
-        let gy = (ci / grid_w) as u32;
-        if let Some(tile) = synth_base_lc_tile(
-            base_idx,
-            &lc_mats,
-            gx * tile_w,
-            gy * tile_h,
-            tile_w,
-            tile_h,
-        ) {
-            tile_by_cell.insert(ci, tile);
-        }
-    }
-
-    // Blit every populated cell into the canvas at its 1:1 position.
-    for ci in 0..cell_count {
-        let blended = match tile_by_cell.get(&ci) {
-            Some(v) => v,
-            None => continue,
-        };
-        let gx = ci % grid_w;
-        let gy = ci / grid_w;
-        image::imageops::replace(
-            &mut canvas,
-            blended,
-            (gx as u32 * tile_w) as i64,
-            (gy as u32 * tile_h) as i64,
-        );
-    }
+                let base_idx = det_s[0] as usize;
+                if base_idx != 0xFFusize {
+                    let _ = synth_base_lc_tile_into(
+                        base_idx,
+                        &lc_mats,
+                        global_x0,
+                        global_y0,
+                        tile_w,
+                        tile_h,
+                        row_band,
+                        canvas_stride,
+                        dest_x0,
+                    );
+                }
+            }
+        });
 
     // Per docs/ORIENTATION.md §6 the canvas is saved 1:1 with the §5 float
     // frame: cell (tx, tz) sits at canvas pixel (tx*tile_w, tz*tile_h); no

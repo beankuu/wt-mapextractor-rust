@@ -38,9 +38,9 @@ Set up `config.json` (see `config.sample.json`):
 
 | Metric | Python | Rust |
 |--------|-------:|-----:|
-| CPU usage | 50–99 % | 20–45 % |
-| Peak RAM | 35+ GB | 12+ GB |
-| Per map | 150–200 s | 15–30 s |
+| CPU usage | 50–99 % | 50–60 % |
+| Peak RAM | 35+ GB | 20+ GB |
+| Per map | 150–200 s | 20~50 s |
 | All maps | ~4000 s | ~400 s |
 | Output total | 25+ GB | 9+ GB |
 

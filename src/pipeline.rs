@@ -236,10 +236,10 @@ impl Pipeline {
             .map(|n| n.get())
             .unwrap_or(1)
             .max(1);
-        // Each worker can transiently hold ~1.5 GB during paint/rendinst.
-        // Default to all logical cores (cap 16) so big machines use full
-        // throughput. Override with `WT_WORKERS=N` if RAM is a constraint.
-        let default_workers = auto_workers.min(16);
+        // Each worker can transiently hold ~1.5 GB and heavy image passes are
+        // memory-bandwidth bound. Use about one worker per physical core on
+        // common SMT CPUs; override with `WT_WORKERS=N` for throughput tests.
+        let default_workers = (auto_workers / 2).max(1).min(8);
         let workers = std::env::var("WT_WORKERS")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())

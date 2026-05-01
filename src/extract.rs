@@ -5,6 +5,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use flate2::read::ZlibDecoder;
+use rayon::prelude::*;
 
 use crate::util::{oodle_decompress, read_u32_le};
 
@@ -219,9 +220,8 @@ fn sanitize_name(s: &str) -> String {
 /// Keys are `"{stem}_{idx:03}"` (no extension), values are raw DDS bytes.
 /// Nothing is written to disk.
 pub fn extract_ddsx_from_data(data: &[u8], stem: &str) -> HashMap<String, Vec<u8>> {
-    let mut store: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
     let mut start = 0usize;
-    let mut idx = 0usize;
 
     while let Some(rel) = data[start..].windows(4).position(|w| w == DDSX_MAGIC) {
         let pos = start + rel;
@@ -245,12 +245,21 @@ pub fn extract_ddsx_from_data(data: &[u8], stem: &str) -> HashMap<String, Vec<u8
             continue;
         }
 
-        if let Some(dds) = ddsx_to_dds(&data[pos..end]) {
-            store.insert(format!("{stem}_{idx:03}"), dds);
-            idx += 1;
-        }
+        ranges.push((pos, end));
 
         start = end;
+    }
+
+    let decoded: Vec<Option<Vec<u8>>> = ranges
+        .par_iter()
+        .map(|(pos, end)| ddsx_to_dds(&data[*pos..*end]))
+        .collect();
+
+    let mut store: HashMap<String, Vec<u8>> = HashMap::with_capacity(decoded.len());
+    let mut idx = 0usize;
+    for dds in decoded.into_iter().flatten() {
+        store.insert(format!("{stem}_{idx:03}"), dds);
+        idx += 1;
     }
 
     store
