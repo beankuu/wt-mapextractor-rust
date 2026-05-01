@@ -55,20 +55,40 @@ export function clearMissionGroup() {
   }
 }
 
+  function preferredMissionMode(items, selectedMode) {
+    if (selectedMode === 'merged') {
+      if (items.some((x) => x.mode === 'arcade')) return 'arcade';
+      if (items.some((x) => x.mode === 'hardcore')) return 'hardcore';
+      return 'arcade';
+    }
+    if (selectedMode !== 'hardcore') return selectedMode;
+    return items.some((x) => x.mode === 'arcade') ? 'arcade' : 'hardcore';
+  }
+
+  function mergedCount(items) {
+    const mode = preferredMissionMode(items || [], 'merged');
+    return (items || []).filter((x) => x.mode === mode).length;
+  }
+
 export function renderMission(mission, mode) {
   clearMissionGroup();
   const M = S.M;
   S.missionGroup = new THREE.Group();
   S.missionGroup.renderOrder = 998;
 
-  const TEAM1_COLOR = 0x4dabf7;
-  const TEAM2_COLOR = 0xff4444;
-  const CAP_COLOR   = 0xffd700;
-  const BA_COLOR    = 0x00d9ff;
+  const TEAM1_COLOR = 0x00a2ff;
+  const TEAM2_COLOR = 0xff2b2b;
+  const CAP_COLOR   = 0xcfa400;
+  const BA_COLOR    = 0x01f1ff;
+
+    const battleMode = preferredMissionMode(mission.battleAreas || [], mode);
+    const captureMode = preferredMissionMode(mission.captureZones || [], mode);
+    const spawnMode = preferredMissionMode(mission.spawns || [], mode);
+    const spawnZoneMode = preferredMissionMode(mission.spawnZones || [], mode);
 
   // Battle areas
   for (const ba of mission.battleAreas) {
-    if (ba.mode !== mode) continue;
+    if (ba.mode !== battleMode) continue;
     const sc = missionWorldToScene(ba.pos[0], ba.pos[1]);
     const planeSize = Math.max(M.mapSize[0], M.mapSize[1]);
     const frame = getMapFrame(M, planeSize);
@@ -84,7 +104,7 @@ export function renderMission(mission, mode) {
     wireGeom.setAttribute('position', new THREE.BufferAttribute(
       buildBoxWireframeVerts(x0, x1, yBot, yTop, z0, z1), 3));
     const wire = new THREE.LineSegments(wireGeom, new THREE.LineBasicMaterial({
-      color: BA_COLOR, depthTest: false, transparent: true, opacity: 0.55
+      color: BA_COLOR, depthTest: false, transparent: true, opacity: 0.35
     }));
     S.missionGroup.add(wire);
 
@@ -101,7 +121,7 @@ export function renderMission(mission, mode) {
 
   // Capture zones
   for (const cap of mission.captureZones) {
-    if (cap.mode !== mode) continue;
+    if (cap.mode !== captureMode) continue;
     const sc = missionWorldToScene(cap.pos[0], cap.pos[1]);
     const planeSize = Math.max(M.mapSize[0], M.mapSize[1]);
     const frame = getMapFrame(M, planeSize);
@@ -113,7 +133,7 @@ export function renderMission(mission, mode) {
 
     const cylGeom = new THREE.CylinderGeometry(r, r, h, 24);
     const cylMat = new THREE.MeshBasicMaterial({
-      color: CAP_COLOR, transparent: true, opacity: 0.16,
+      color: CAP_COLOR, transparent: true, opacity: 0.34,
       side: THREE.DoubleSide, depthWrite: false
     });
     const cyl = new THREE.Mesh(cylGeom, cylMat);
@@ -122,7 +142,7 @@ export function renderMission(mission, mode) {
 
     const ringGeom = new THREE.RingGeometry(r * 0.95, r, 32);
     const ringMat = new THREE.MeshBasicMaterial({
-      color: CAP_COLOR, transparent: true, opacity: 0.62,
+      color: CAP_COLOR, transparent: true, opacity: 0.9,
       side: THREE.DoubleSide, depthWrite: false
     });
     const ring = new THREE.Mesh(ringGeom, ringMat);
@@ -155,7 +175,7 @@ export function renderMission(mission, mode) {
 
   // Spawn squads
   for (const sp of mission.spawns) {
-    if (sp.mode !== mode) continue;
+    if (sp.mode !== spawnMode) continue;
     const sc = missionWorldToScene(sp.pos[0], sp.pos[1]);
     const color = sp.team === 1 ? TEAM1_COLOR : sp.team === 2 ? TEAM2_COLOR : 0x88ff88;
     const teamLabel = sp.team === 1 ? '1' : sp.team === 2 ? '2' : '?';
@@ -164,10 +184,10 @@ export function renderMission(mission, mode) {
     cvs.width = 64; cvs.height = 64;
     const ctx = cvs.getContext('2d');
     const hex = '#' + color.toString(16).padStart(6, '0');
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
     ctx.beginPath(); ctx.arc(32, 28, 22, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = hex; ctx.strokeStyle = hex;
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 3.0;
     ctx.beginPath(); ctx.arc(32, 28, 22, 0, Math.PI * 2); ctx.stroke();
     ctx.font = 'bold 26px sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -188,13 +208,14 @@ export function renderMission(mission, mode) {
   // Individual spawn zones
   const planeSize = Math.max(M.mapSize[0], M.mapSize[1]);
   const frame = getMapFrame(M, planeSize);
-  const spawnDotR = 5 * frame.sX;
+  const spawnDotR = 7 * frame.sX;
   for (const sz of mission.spawnZones) {
+    if (sz.mode !== spawnZoneMode) continue;
     const sc = missionWorldToScene(sz.pos[0], sz.pos[1]);
     const color = sz.team === 1 ? TEAM1_COLOR : sz.team === 2 ? TEAM2_COLOR : 0x88ff88;
     const dotGeom = new THREE.CircleGeometry(spawnDotR, 8);
     const dotMat = new THREE.MeshBasicMaterial({
-      color, transparent: true, opacity: 0.7,
+      color, transparent: true, opacity: 0.96,
       side: THREE.DoubleSide, depthWrite: false
     });
     const dot = new THREE.Mesh(dotGeom, dotMat);
@@ -241,14 +262,14 @@ export function buildMissionsUI() {
 
   function updateMissionActiveText() {
     const selected = document.querySelector('input[name="mission"]:checked');
-    const mode = document.querySelector('input[name="mmode"]:checked')?.value || 'arcade';
+    const mode = 'merged';
     if (!selected || selected.value === '') {
       missionActiveEl.textContent = 'Active: None';
       return;
     }
     const idx = parseInt(selected.value);
     const label = missions[idx] && missions[idx].label ? expandMissionName(missions[idx].label) : `Mission ${idx + 1}`;
-    missionActiveEl.textContent = `Active: ${label} (${mode})`;
+    missionActiveEl.textContent = `Active: ${label}`;
   }
 
   const noneRow = document.createElement('div');
@@ -263,18 +284,19 @@ export function buildMissionsUI() {
     const row = document.createElement('div');
     row.className = 'mission-radio-row';
     const id = `mission-${i}`;
-    const arcadeCaps = m.captureZones.filter(c => c.mode === 'arcade').length;
+    const capCount = mergedCount(m.captureZones);
     const missionName = expandMissionName(m.label);
     row.innerHTML = `
       <input type="radio" name="mission" id="${id}" value="${i}">
       <label for="${id}">${missionName}</label>
-      <span class="mission-count">${arcadeCaps > 0 ? arcadeCaps + ' cap' : ''}</span>
+      <span class="mission-count">${capCount > 0 ? capCount + ' cap' : ''}</span>
     `;
     listDiv.appendChild(row);
   });
 
-  modeRow.style.display = 'flex';
+  modeRow.style.display = 'none';
   legendDiv.style.display = 'flex';
+  legendDiv.innerHTML = '<span style="color:#00a2ff;">●</span>&nbsp;Team 1&nbsp;&nbsp;<span style="color:#ff2b2b;">●</span>&nbsp;Team 2&nbsp;&nbsp;<span style="color:#ffc400;">●</span>&nbsp;Capture&nbsp;&nbsp;<span style="color:#00f0ff;">●</span>&nbsp;Battle Area';
 
   function updateMissionOverlay() {
     const selected = document.querySelector('input[name="mission"]:checked');
@@ -284,7 +306,7 @@ export function buildMissionsUI() {
       return;
     }
     const idx = parseInt(selected.value);
-    const mode = document.querySelector('input[name="mmode"]:checked').value;
+    const mode = 'merged';
     renderMission(missions[idx], mode);
     syncMissionSelectionUI();
     updateMissionActiveText();
@@ -307,9 +329,6 @@ export function buildMissionsUI() {
       input.checked = true;
       updateMissionOverlay();
     });
-  });
-  modeRow.querySelectorAll('input[name="mmode"]').forEach(r => {
-    r.addEventListener('change', updateMissionOverlay);
   });
   syncMissionSelectionUI();
   updateMissionActiveText();

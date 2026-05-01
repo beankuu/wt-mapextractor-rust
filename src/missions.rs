@@ -5,20 +5,43 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde_json::{json, Value};
 
-fn mode_from_name(name: &str) -> &'static str {
+fn modes_for_name(name: &str) -> &'static [&'static str] {
     let n = name.to_ascii_lowercase();
     if n.contains("hardcore") {
-        "hardcore"
+        &["hardcore"]
     } else {
-        "arcade"
+        // Many mission assets are tagged as arcade but are used by realistic too.
+        &["arcade", "hardcore"]
     }
+}
+
+fn mission_kind_from_stem(stem: &str) -> &'static str {
+    let s = stem.to_ascii_lowercase();
+    if s.contains("_bttl") {
+        "bttl"
+    } else {
+        "other"
+    }
+}
+
+fn is_bttl_briefing_respawn(area_name_lower: &str) -> bool {
+    area_name_lower.starts_with("briefing_t") && area_name_lower.contains("_resp")
+}
+
+fn is_bttl_capture_area(area_name_lower: &str) -> bool {
+    area_name_lower.starts_with("bttl_t1_capture_area") || area_name_lower.starts_with("bttl_t2_capture_area")
 }
 
 fn team_from_name(name: &str) -> i32 {
     let n = name.to_ascii_lowercase();
-    if n.contains("t1") || n.contains("team1") || n.contains("_a") {
+    let tokens: Vec<&str> = n
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if tokens.iter().any(|t| *t == "t1" || *t == "team1") {
         1
-    } else if n.contains("t2") || n.contains("team2") || n.contains("_b") {
+    } else if tokens.iter().any(|t| *t == "t2" || *t == "team2") {
         2
     } else {
         0
@@ -64,6 +87,28 @@ fn tm_cylinder_radius(v: &Value) -> Option<f64> {
     Some((row0[0].as_f64()?.powi(2) + row0[2].as_f64()?.powi(2)).sqrt())
 }
 
+/// Scans `name` for the first `_<digits>` segment and converts the number to a
+/// letter label (1→"A", 2→"B", …).  Returns `None` when no numeric segment exists.
+fn numeric_label_from_name(name: &str) -> Option<String> {
+    let b = name.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'_' && i + 1 < b.len() && b[i + 1].is_ascii_digit() {
+            let start = i + 1;
+            let mut end = start;
+            while end < b.len() && b[end].is_ascii_digit() {
+                end += 1;
+            }
+            if let Ok(n) = name[start..end].parse::<usize>() {
+                let ch = (b'A' + ((n.saturating_sub(1)) % 26) as u8) as char;
+                return Some(ch.to_string());
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
 fn mission_label_from_stem(stem: &str, suffix: &str) -> String {
     let lower = stem.to_ascii_lowercase();
     let pref = format!("{}_", suffix.to_ascii_lowercase());
@@ -77,6 +122,7 @@ fn parse_one_mission_file(path: &Path, suffix: &str) -> Option<Value> {
 
     let stem = path.file_stem()?.to_string_lossy().to_string();
     let label = mission_label_from_stem(&stem, suffix);
+    let mission_kind = mission_kind_from_stem(&stem);
 
     let mut spawn_name_set: HashSet<String> = HashSet::new();
     let mut spawns: Vec<Value> = Vec::new();
@@ -87,18 +133,26 @@ fn parse_one_mission_file(path: &Path, suffix: &str) -> Option<Value> {
     {
         for sq in area_squad {
             let name = sq.get("name").and_then(Value::as_str).unwrap_or("");
+            let name_lower = name.to_ascii_lowercase();
+            // Keep only real spawn-like entities; area_squad often includes kill areas.
+            if name_lower.contains("killarea")
+                || !(name_lower.contains("spawn") || name_lower.contains("resp"))
+            {
+                continue;
+            }
             let pos = match tm_pos_xz(sq) {
                 Some(v) => v,
                 None => continue,
             };
-            let mode = mode_from_name(name);
             let team = team_from_name(name);
-            spawns.push(json!({
-                "name": name,
-                "mode": mode,
-                "team": team,
-                "pos": [pos[0], pos[1]],
-            }));
+            for mode in modes_for_name(name) {
+                spawns.push(json!({
+                    "name": name,
+                    "mode": mode,
+                    "team": team,
+                    "pos": [pos[0], pos[1]],
+                }));
+            }
 
             if let Some(members) = sq
                 .get("props")
@@ -120,49 +174,62 @@ fn parse_one_mission_file(path: &Path, suffix: &str) -> Option<Value> {
     if let Some(areas) = root.get("areas").and_then(Value::as_object) {
         for (name, area) in areas {
             let l = name.to_ascii_lowercase();
-            let mode = mode_from_name(name);
-            if spawn_name_set.contains(name) {
+            let include_spawn = if mission_kind == "bttl" {
+                is_bttl_briefing_respawn(&l)
+            } else {
+                spawn_name_set.contains(name)
+            };
+            if include_spawn {
                 if let Some(pos) = tm_pos_xz(area) {
-                    spawn_zones.push(json!({
-                        "name": name,
-                        "mode": mode,
-                        "team": team_from_name(name),
-                        "pos": [pos[0], pos[1]],
-                    }));
+                    for mode in modes_for_name(name) {
+                        spawn_zones.push(json!({
+                            "name": name,
+                            "mode": mode,
+                            "team": team_from_name(name),
+                            "pos": [pos[0], pos[1]],
+                        }));
+                    }
                 }
             }
 
-            if l.contains("capture_area") || l.contains("flag_area") {
+            let include_capture = if mission_kind == "bttl" {
+                is_bttl_capture_area(&l)
+            } else {
+                l.contains("capture_area") || l.contains("flag_area") || l.contains("capture_zone")
+            };
+            if include_capture {
                 if let (Some(pos), Some(radius)) = (tm_pos_xz(area), tm_cylinder_radius(area)) {
-                    let label = if let Some(idx) = l.rfind('_') {
-                        l[idx + 1..]
-                            .parse::<usize>()
-                            .ok()
-                            .map(|n| ((b'A' + ((n.saturating_sub(1)) % 26) as u8) as char).to_string())
-                    } else {
-                        None
-                    };
-                    capture_zones.push(json!({
-                        "name": name,
-                        "mode": mode,
-                        "pos": [pos[0], pos[1]],
-                        "radius": radius,
-                        "label": label,
-                    }));
+                    let label = numeric_label_from_name(&l);
+                    for mode in modes_for_name(name) {
+                        capture_zones.push(json!({
+                            "name": name,
+                            "mode": mode,
+                            "pos": [pos[0], pos[1]],
+                            "radius": radius,
+                            "label": label,
+                        }));
+                    }
                 }
             }
 
             if l.contains("battle_area") || l.contains("battlearea") {
                 if let (Some(pos), Some(half)) = (tm_pos_xz(area), tm_box_half_size_xz(area)) {
-                    battle_areas.push(json!({
-                        "name": name,
-                        "mode": mode,
-                        "pos": [pos[0], pos[1]],
-                        "halfSize": [half[0], half[1]],
-                    }));
+                    for mode in modes_for_name(name) {
+                        battle_areas.push(json!({
+                            "name": name,
+                            "mode": mode,
+                            "pos": [pos[0], pos[1]],
+                            "halfSize": [half[0], half[1]],
+                        }));
+                    }
                 }
             }
         }
+    }
+
+    if mission_kind == "bttl" {
+        // For battle missions, briefing areas are the reliable ground-truth spawn markers.
+        spawns = spawn_zones.clone();
     }
 
     Some(json!({
