@@ -1,6 +1,4 @@
 {
   "datamine": "D:\\War-Thunder-Datamine",
-  "client": "D:\\SteamLibrary\\steamapps\\common\\War Thunder",
-  "oo2core": "./src/oo2core_9_win64.dll",
-  "cdk": "D:\\WarThunderCDK"
+  "client": "D:\\SteamLibrary\\steamapps\\common\\War Thunder"
 }

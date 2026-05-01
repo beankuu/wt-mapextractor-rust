@@ -16,10 +16,10 @@ tiny_http = "0.12"
 flate2 = "1.1"
 image = { version = "0.25", default-features = true }
 image_dds = { version = "0.7", default-features = false, features = ["ddsfile", "image"] }
-libloading = "0.8"
 tempfile = "3.20"
 zstd = "0.13"
 lzma-rs = "0.3"
+oozextract = "0.5.0"
 rayon = "1.10"
 webbrowser = "1.0"
 

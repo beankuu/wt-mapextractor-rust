@@ -25,9 +25,9 @@ Set up `config.json` (see `config.sample.json`):
 1. **Datamine path** — local clone of
    <https://github.com/gszabi99/War-Thunder-Datamine>
 2. **Client path** — local War Thunder installation
-3. **`oo2core_9_win64.dll`** — copy into `src/` (or set `OODLE_DLL` env
-   var). The DLL is not shipped by War Thunder; obtain it from another
-   game such as Warframe.
+3. **Oodle decompression** — handled natively via
+   [`oozextract`](https://github.com/lvlvllvlvllvlvl/oozextract) (pure Rust
+   port of ooz). No DLL required.
 
 ## Test Environment
 
@@ -59,8 +59,8 @@ cargo run --release -- iwo_jima guam
 # open viewer without building
 cargo run --release --
 
-# tune worker count (default = min(CPU, 4); raise on big-RAM machines)
-$env:WT_WORKERS="16"; cargo run --release -- --all
+# tune worker count (default = min(CPU, 16); reduce on low-RAM machines)
+$env:WT_WORKERS="8"; cargo run --release -- --all
 ```
 
 ### Useful flags
@@ -94,7 +94,7 @@ metadata uses the optional files below.
 | `<map>.dxp.bin` | optional | DxP2 texture pack — terrain material overlays |
 | `hq_tex_<map>.dxp.bin` | optional | High-quality DxP2 texture pack |
 
-Also required at runtime: `src/oo2core_9_win64.dll` (or `OODLE_DLL`).
+Oodle decompression is built-in (`oozextract`). No external DLL needed.
 
 ## Pipeline
 
@@ -195,10 +195,6 @@ src/
   server.rs           - local static server for the viewer
   util.rs             - shared helpers
   viewer.html         - Three.js 3D viewer
-  index.html          - batch gallery
-  web/                - viewer JS modules (scene, hover, globe, tools, ...)
-  World_Map.svg       - Robinson world map used by the Earth mini-globe
-  oo2core_9_win64.dll - Oodle decoder (gitignored)
 config.json           - datamine + client paths (gitignored)
 config.sample.json    - example configuration
 maps/                 - output (default): per-map directories (gitignored)

@@ -20,15 +20,12 @@ use clap::Parser;
 use crate::cli::Cli;
 use crate::config::AppConfig;
 use crate::pipeline::{BuildOptions, Pipeline};
-use crate::util::set_oodle_dll_path;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let serve = !cli.no_serve;
 
     let cfg = AppConfig::load(".")?;
-    // Register oo2core DLL path with the decompressor before any map processing.
-    set_oodle_dll_path(cfg.oo2core_dll.as_deref());
     let pipe = Pipeline::new(cfg.clone());
 
     let opts = BuildOptions {

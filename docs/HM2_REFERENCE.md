@@ -86,7 +86,9 @@ Scan for `HM2\x00` tag from offset `0x10000` in the `.bin` file.
 
 ## 4. Decompression
 
-Uses Oodle compression (`oo2core_9_win64.dll`), page size = 256 KB.
+Uses Oodle compression (Kraken). Handled natively by `oozextract` (pure-Rust
+reimplementation of ooz; no DLL required). `oo2core_9_win64.dll` can be
+supplied via `--oo2core <path>` as a fallback if needed.
 
 ### Strategy
 

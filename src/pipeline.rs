@@ -236,11 +236,10 @@ impl Pipeline {
             .map(|n| n.get())
             .unwrap_or(1)
             .max(1);
-        // Bound worker parallelism so peak memory stays safe on 16/32 GB
-        // machines: each worker can transiently hold ~1.5 GB of DDS/PNG
-        // buffers during paint/rendinst. The user can override with
-        // `WT_WORKERS=N` if they have more RAM to spare.
-        let default_workers = auto_workers.min(4);
+        // Each worker can transiently hold ~1.5 GB during paint/rendinst.
+        // Default to all logical cores (cap 16) so big machines use full
+        // throughput. Override with `WT_WORKERS=N` if RAM is a constraint.
+        let default_workers = auto_workers.min(16);
         let workers = std::env::var("WT_WORKERS")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
@@ -692,11 +691,7 @@ impl Pipeline {
             Value::Null
         };
 
-        let mut landclasses_manifest = detail_info
-            .get("landclasses")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
+        let mut landclasses_manifest = landclass_list.clone();
         if let Some(paint_obj) = paint_info.as_object() {
             if let Some(lc_names) = paint_obj.get("lcNames").and_then(Value::as_array) {
                 if lc_names.len() > landclasses_manifest.len() {

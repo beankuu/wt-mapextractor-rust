@@ -11,9 +11,9 @@ import { S } from './state.js';
 // 6) UI popup handled by viewer-app on terrain-intro-complete event (2s CSS)
 const PHASE_WAIT_MS = 0;
 const PHASE_HEIGHT_MS = 5000;
-const PHASE_PRE_TEX_DELAY_MS = 2000;
+const PHASE_PRE_TEX_DELAY_MS = 1000;
 const PHASE_TEX_MS = 3000;
-const PHASE_WATER_MS = 1000;
+const PHASE_WATER_MS = 500;
 const PHASE_OBJECTS_MS = 1200;
 const WAVE_END = 2.20;
 
