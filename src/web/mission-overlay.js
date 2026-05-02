@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { S } from './state.js';
 import { DATA, buildBoxWireframeVerts } from './helpers.js';
 import { getMapFrame, worldToSceneXZ } from './coords.js';
+import { renderMinimap } from './minimap.js';
 
 // Map mission abbreviations to full names
 function expandMissionName(label) {
@@ -208,18 +209,20 @@ export function renderMission(mission, mode) {
   // Individual spawn zones
   const planeSize = Math.max(M.mapSize[0], M.mapSize[1]);
   const frame = getMapFrame(M, planeSize);
-  const spawnDotR = 7 * frame.sX;
+  // Radius ~ 0.4% of world width, minimum 60 m, so dots are visible at any map scale.
+  const spawnDotR = Math.max(60, frame.mcW * 0.004) * frame.sX;
   for (const sz of mission.spawnZones) {
     if (sz.mode !== spawnZoneMode) continue;
     const sc = missionWorldToScene(sz.pos[0], sz.pos[1]);
     const color = sz.team === 1 ? TEAM1_COLOR : sz.team === 2 ? TEAM2_COLOR : 0x88ff88;
-    const dotGeom = new THREE.CircleGeometry(spawnDotR, 8);
+    const dotGeom = new THREE.CircleGeometry(spawnDotR, 16);
     const dotMat = new THREE.MeshBasicMaterial({
       color, transparent: true, opacity: 0.96,
-      side: THREE.DoubleSide, depthWrite: false
+      side: THREE.DoubleSide, depthWrite: false, depthTest: false
     });
     const dot = new THREE.Mesh(dotGeom, dotMat);
     dot.rotation.x = -Math.PI / 2;
+    dot.renderOrder = 998;
     dot.position.set(sc.x, _missionSceneY(2), sc.z);
     S.missionGroup.add(dot);
   }
@@ -302,7 +305,9 @@ export function buildMissionsUI() {
     const selected = document.querySelector('input[name="mission"]:checked');
     if (!selected || selected.value === '') {
       clearMissionGroup();
+      syncMissionSelectionUI();
       updateMissionActiveText();
+      renderMinimap();
       return;
     }
     const idx = parseInt(selected.value);
@@ -310,6 +315,7 @@ export function buildMissionsUI() {
     renderMission(missions[idx], mode);
     syncMissionSelectionUI();
     updateMissionActiveText();
+    renderMinimap();
   }
 
   function syncMissionSelectionUI() {

@@ -1,0 +1,16 @@
+[package]
+name = "wt-ingame-map"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "wt-ingame-map"
+path = "src/main.rs"
+
+[dependencies]
+image = "0.25"
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"

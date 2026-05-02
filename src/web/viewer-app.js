@@ -8,6 +8,7 @@ import { setupHover, updateHoverCoords } from './hover.js';
 import { setupGizmo } from './gizmo.js';
 import { rulerTool, setupToolEvents } from './tool-events.js';
 import { updateLoSVisuals } from './webgpu-los.js';
+import { initMinimap } from './minimap.js';
 
 async function init() {
   setupScene();
@@ -47,6 +48,7 @@ async function init() {
   await loadTerrain();
   syncZoomSlider();
   buildUI();
+  initMinimap();
 
   try {
     if (S.M && S.M.hasMissions) {

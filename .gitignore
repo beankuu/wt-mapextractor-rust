@@ -4,8 +4,6 @@ viewer_data/
 config.json
 oo2core*.dll
 
-# Standalone in-game-map renderer (not part of mainstream pipeline)
-ingame_map/
 
 CHANGELOG.md
 

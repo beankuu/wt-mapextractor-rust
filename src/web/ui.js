@@ -4,6 +4,7 @@ import { S } from './state.js';
 import { DATA, ASSET_PREFIX } from './helpers.js';
 import { setHeightScale } from './height-scale.js';
 import { initEarthGlobe } from './earth-globe.js';
+import { refreshMinimapOptions } from './minimap.js';
 
 function _titleCaseType(name) {
   return String(name || 'other').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -53,17 +54,22 @@ function _buildObjectTypesUI() {
       <label for="objtype-${key}" style="color:#9fb3cc;">${_titleCaseType(key)} (${count.toLocaleString()})</label>
     `;
     const cb = row.querySelector('input');
-    cb.addEventListener('change', () => { data.mesh.visible = cb.checked; });
+    cb.addEventListener('change', () => {
+      data.mesh.visible = cb.checked;
+      refreshMinimapOptions();
+    });
     list.appendChild(row);
   }
 
   btnEnableAll.onclick = () => {
     Object.values(S.rendinstCategoryData).forEach(d => { d.mesh.visible = true; });
     list.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = true; });
+    refreshMinimapOptions();
   };
   btnDisableAll.onclick = () => {
     Object.values(S.rendinstCategoryData).forEach(d => { d.mesh.visible = false; });
     list.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+    refreshMinimapOptions();
   };
 
   btnRealObjects.textContent = S.rendinstRealLoaded
@@ -349,10 +355,12 @@ export function buildUI() {
     cb.checked = !!S.waterLikelyOcean;
     cb.addEventListener('change', () => {
       S.waterMesh.visible = cb.checked;
+      refreshMinimapOptions();
       S.needsRender = true;
     });
     sl.addEventListener('input', () => {
       S.waterMesh.material.opacity = sl.value / 100;
+      refreshMinimapOptions();
       S.needsRender = true;
     });
     S.waterMesh.visible = cb.checked;
@@ -361,7 +369,10 @@ export function buildUI() {
   if (S.tankZoneMesh) {
     document.getElementById('row-tankzone').style.display = '';
     const cb = document.getElementById('cb-tankzone');
-    cb.addEventListener('change', () => { S.tankZoneMesh.visible = cb.checked; });
+    cb.addEventListener('change', () => {
+      S.tankZoneMesh.visible = cb.checked;
+      refreshMinimapOptions();
+    });
   }
 
   if (S.splatmapMesh) {
@@ -381,7 +392,10 @@ export function buildUI() {
     document.getElementById('row-rendinst').style.display = '';
     const cb = document.getElementById('cb-rendinst');
     const sl = document.getElementById('sl-rendinst');
-    cb.addEventListener('change', () => { S.rendinstGroup.visible = cb.checked; });
+    cb.addEventListener('change', () => {
+      S.rendinstGroup.visible = cb.checked;
+      refreshMinimapOptions();
+    });
     sl.addEventListener('input', () => {
       const op = sl.value / 100;
       S.rendinstGroup.children.forEach(m => {
@@ -389,6 +403,7 @@ export function buildUI() {
         m.material.transparent = op < 1;
         m.material.needsUpdate = true;
       });
+      refreshMinimapOptions();
     });
     _buildObjectTypesUI();
   }

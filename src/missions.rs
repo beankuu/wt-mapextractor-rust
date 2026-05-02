@@ -178,6 +178,7 @@ fn parse_one_mission_file(path: &Path, suffix: &str) -> Option<Value> {
                 is_bttl_briefing_respawn(&l)
             } else {
                 spawn_name_set.contains(name)
+                    || (!l.contains("killarea") && (l.contains("spawn") || l.contains("resp")))
             };
             if include_spawn {
                 if let Some(pos) = tm_pos_xz(area) {
@@ -246,6 +247,9 @@ pub fn extract_missions_for_map(datamine_root: &Path, map_name: &str) -> Result<
         .split_once('_')
         .map(|(_, s)| s)
         .unwrap_or(map_name);
+    let map_lower = map_name.to_ascii_lowercase();
+    let suffix_lower = suffix.to_ascii_lowercase();
+    let is_air_map = map_lower.starts_with("air_");
 
     let mission_dir: PathBuf = datamine_root
         .join("mis.vromfs.bin_u")
@@ -255,16 +259,35 @@ pub fn extract_missions_for_map(datamine_root: &Path, map_name: &str) -> Result<
         .join("tanks")
         .join(suffix);
 
-    if !mission_dir.exists() || !mission_dir.is_dir() {
-        return Ok(None);
+    let mission_root = datamine_root
+        .join("mis.vromfs.bin_u")
+        .join("gamedata")
+        .join("missions");
+
+    let mut candidate_files: Vec<PathBuf> = Vec::new();
+    if !is_air_map && mission_dir.exists() && mission_dir.is_dir() {
+        for ent in fs::read_dir(&mission_dir)? {
+            let p = ent?.path();
+            if p.is_file() {
+                candidate_files.push(p);
+            }
+        }
+    }
+
+    if is_air_map {
+        let air_roots = [
+            mission_root.join("bridges"),
+            mission_root.join("cta").join("planes"),
+            mission_root.join("cta").join("helicopters"),
+        ];
+        for root in air_roots {
+            collect_air_mission_files(&root, &map_lower, &suffix_lower, &mut candidate_files)?;
+        }
     }
 
     let mut missions: Vec<Value> = Vec::new();
-    for ent in fs::read_dir(&mission_dir)? {
-        let p = ent?.path();
-        if !p.is_file() {
-            continue;
-        }
+    let tank_stem_prefix = format!("{suffix_lower}_");
+    for p in candidate_files {
         if p.extension().and_then(|e| e.to_str()) != Some("blkx") {
             continue;
         }
@@ -276,7 +299,11 @@ pub fn extract_missions_for_map(datamine_root: &Path, map_name: &str) -> Result<
         if stem.starts_with("template_") {
             continue;
         }
-        if !stem.starts_with(&format!("{}_", suffix.to_ascii_lowercase())) {
+        if is_air_map {
+            if !(stem.contains(&map_lower) || stem.contains(&suffix_lower)) {
+                continue;
+            }
+        } else if !stem.starts_with(&tank_stem_prefix) {
             continue;
         }
 
@@ -296,4 +323,29 @@ pub fn extract_missions_for_map(datamine_root: &Path, map_name: &str) -> Result<
     });
 
     Ok(Some(json!({ "missions": missions })))
+}
+
+fn collect_air_mission_files(root: &Path, map_lower: &str, suffix_lower: &str, out: &mut Vec<PathBuf>) -> Result<()> {
+    if !root.exists() || !root.is_dir() {
+        return Ok(());
+    }
+    for ent in fs::read_dir(root)? {
+        let p = ent?.path();
+        if p.is_dir() {
+            collect_air_mission_files(&p, map_lower, suffix_lower, out)?;
+            continue;
+        }
+        if p.extension().and_then(|e| e.to_str()) != Some("blkx") {
+            continue;
+        }
+        let stem = p
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if stem.contains(map_lower) || stem.contains(suffix_lower) {
+            out.push(p);
+        }
+    }
+    Ok(())
 }

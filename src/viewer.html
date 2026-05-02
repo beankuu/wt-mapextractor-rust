@@ -276,6 +276,77 @@
   }
   #gpu-badge.active { color: #2dd4bf; border-color: #2dd4bf; }
 
+  #minimap-widget {
+    position: fixed;
+    top: 48px;
+    right: 14px;
+    z-index: 11;
+    width: 188px;
+    background: rgba(10, 18, 36, 0.92);
+    border: 1px solid #1e3a5f;
+    border-radius: 8px;
+    padding: 8px;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+    transition: transform 2s cubic-bezier(0.22, 1, 0.36, 1), opacity 2s ease, filter 2s ease;
+  }
+  #minimap-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  #minimap-title {
+    flex: 1;
+    color: #7fb4ff;
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  #minimap-type {
+    width: 96px;
+    background: #0f1f35;
+    border: 1px solid #1e3a5f;
+    color: #cfe1ff;
+    border-radius: 4px;
+    padding: 3px 5px;
+    font-size: 10px;
+  }
+  #minimap-canvas {
+    display: block;
+    width: 172px;
+    height: 172px;
+    border-radius: 4px;
+    border: 1px solid #27466d;
+    background: #07101d;
+  }
+  #minimap-footer {
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  #minimap-ruler {
+    flex: 1;
+    color: #95afcf;
+    font-size: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #minimap-download {
+    background: #0f1f35;
+    border: 1px solid #1e3a5f;
+    color: #cfe1ff;
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 10px;
+    cursor: pointer;
+  }
+  #minimap-download:hover {
+    background: rgba(30, 58, 95, 0.55);
+  }
+
   /* Pre-ready UI state: hidden until 3D objects are loaded. */
   body:not(.ui-ready) #panel {
     transform: translateX(-320px) !important;
@@ -291,7 +362,8 @@
   body:not(.ui-ready) #zoom-bar,
   body:not(.ui-ready) #tool-bar,
   body:not(.ui-ready) #gpu-badge,
-  body:not(.ui-ready) #sun-widget {
+  body:not(.ui-ready) #sun-widget,
+  body:not(.ui-ready) #minimap-widget {
     transform: translateX(36px);
     opacity: 0;
     filter: brightness(0.55) saturate(0.45);
@@ -302,7 +374,8 @@
   body.ui-ready #zoom-bar,
   body.ui-ready #tool-bar,
   body.ui-ready #gpu-badge,
-  body.ui-ready #sun-widget {
+  body.ui-ready #sun-widget,
+  body.ui-ready #minimap-widget {
     opacity: 1;
     filter: none;
     pointer-events: auto;
@@ -465,6 +538,21 @@
 
 <a id="back-btn" href="index.html" title="Back to map list" style="position:fixed;top:10px;right:14px;z-index:11;background:rgba(10,18,36,0.9);border:1px solid #1e3a5f;color:#4dabf7;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:12px;display:none;">&larr; Maps</a>
 <div id="gpu-badge">CPU</div>
+<div id="minimap-widget" style="display:none">
+  <div id="minimap-header">
+    <div id="minimap-title">Minimap</div>
+    <select id="minimap-type" title="Minimap source">
+      <option value="main">Main map</option>
+      <option value="heightmap">Heightmap</option>
+      <option value="battle">Battle zone</option>
+    </select>
+  </div>
+  <canvas id="minimap-canvas" width="172" height="172"></canvas>
+  <div id="minimap-footer">
+    <div id="minimap-ruler">1 grid = -- m</div>
+    <button id="minimap-download" type="button">Download</button>
+  </div>
+</div>
 <button id="toggle-panel" title="Toggle panel">&#9776;</button>
 <div id="panel" class="collapsed">
   <h1 id="map-title">Map Viewer</h1>

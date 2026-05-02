@@ -6,7 +6,7 @@ use std::hash::{Hash, Hasher};
 
 use anyhow::Result;
 use image::codecs::jpeg::JpegEncoder;
-use image::{DynamicImage, ImageBuffer, Rgb, Rgba, RgbaImage};
+use image::{DynamicImage, ImageBuffer, Rgb, RgbaImage};
 use rayon::prelude::*;
 use serde_json::{json, Value};
 
@@ -71,20 +71,16 @@ fn is_normalmap(img: &DynamicImage) -> bool {
 fn dxt5nm_to_normalmap(img: &DynamicImage) -> ImageBuffer<Rgb<u8>, Vec<u8>> {
     let rgba = img.to_rgba8();
     let (w, h) = rgba.dimensions();
-    let mut out = ImageBuffer::new(w, h);
-    for y in 0..h {
-        for x in 0..w {
-            let p: &Rgba<u8> = rgba.get_pixel(x, y);
-            let nx = p[3] as f32 / 127.5 - 1.0;
-            let ny = p[1] as f32 / 127.5 - 1.0;
-            let nz = (1.0 - nx * nx - ny * ny).max(0.0).sqrt();
-            let r = ((nx * 0.5 + 0.5) * 255.0).clamp(0.0, 255.0) as u8;
-            let g = ((ny * 0.5 + 0.5) * 255.0).clamp(0.0, 255.0) as u8;
-            let b = ((nz * 0.5 + 0.5) * 255.0).clamp(0.0, 255.0) as u8;
-            out.put_pixel(x, y, Rgb([r, g, b]));
-        }
+    let mut out = Vec::with_capacity((w as usize) * (h as usize) * 3);
+    for p in rgba.as_raw().chunks_exact(4) {
+        let nx = p[3] as f32 / 127.5 - 1.0;
+        let ny = p[1] as f32 / 127.5 - 1.0;
+        let nz = (1.0 - nx * nx - ny * ny).max(0.0).sqrt();
+        out.push(((nx * 0.5 + 0.5) * 255.0).clamp(0.0, 255.0) as u8);
+        out.push(((ny * 0.5 + 0.5) * 255.0).clamp(0.0, 255.0) as u8);
+        out.push(((nz * 0.5 + 0.5) * 255.0).clamp(0.0, 255.0) as u8);
     }
-    out
+    ImageBuffer::from_raw(w, h, out).expect("normalmap buffer size matches image dimensions")
 }
 
 pub fn export_overview(map_name: &str, dds_store: &DdsStore, viewer_dir: &Path) -> Result<Option<Value>> {

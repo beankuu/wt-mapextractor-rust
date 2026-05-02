@@ -345,27 +345,11 @@ impl Pipeline {
             .join(&map);
 
         if viewer_dir.exists() {
-            // Don't delete the entire map folder, just clean known output files
-            let _ = fs::remove_file(viewer_dir.join("heightmap.png"));
-            let _ = fs::remove_file(viewer_dir.join("heightmap_detail.png"));
-            let _ = fs::remove_file(viewer_dir.join("normalmap_detail.png"));
-            let _ = fs::remove_file(viewer_dir.join("colormap.jpg"));
-            let _ = fs::remove_file(viewer_dir.join("colormap.png"));
-            let _ = fs::remove_file(viewer_dir.join("tile_grid.json"));
-            let _ = fs::remove_file(viewer_dir.join("terrain_paint.png"));
-            let _ = fs::remove_file(viewer_dir.join("terrain_paint.jpg"));
-            let _ = fs::remove_file(viewer_dir.join("terrain_paint_thumb.png"));
-            let _ = fs::remove_file(viewer_dir.join("terrain_paint_thumb.jpg"));
-            let _ = fs::remove_file(viewer_dir.join("terrain_paint_detail.png"));
-            let _ = fs::remove_file(viewer_dir.join("terrain_paint_detail.jpg"));
-            let _ = fs::remove_file(viewer_dir.join("missions.json"));
-            let _ = fs::remove_file(viewer_dir.join("manifest.json"));
-            let _ = fs::remove_dir_all(viewer_dir.join("mat"));
-            let _ = fs::remove_dir_all(viewer_dir.join("thumbs"));
-        } else {
-            fs::create_dir_all(&viewer_dir)
-                .with_context(|| format!("Failed to create {}", viewer_dir.display()))?;
+            fs::remove_dir_all(&viewer_dir)
+                .with_context(|| format!("Failed to remove {}", viewer_dir.display()))?;
         }
+        fs::create_dir_all(&viewer_dir)
+            .with_context(|| format!("Failed to create {}", viewer_dir.display()))?;
         if opts.export_mat {
             fs::create_dir_all(viewer_dir.join("mat"))?;
         }

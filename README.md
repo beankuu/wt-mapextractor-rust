@@ -164,12 +164,20 @@ Open `src/viewer.html` (or omit `--no-serve`). Highlights:
 
 ## Standalone in-game-map tool
 
-A separate gitignored crate at `ingame_map/` renders a 2D tactical-map
-PNG (grid + scale bar) from an already-extracted `maps/<name>/`
-directory. It is intentionally outside the mainstream pipeline.
+A separate crate at `ingame_map/` renders a 2D tactical-map PNG from an
+already-extracted `maps/<name>/` directory. It includes the grid, scale bar,
+ocean mask, objects, and optional selected mission battle/capture/spawn
+overlays. Outputs are saved under `ingame_map/` by default.
 
 ```powershell
 cargo run --manifest-path ingame_map/Cargo.toml --release -- avg_vietnam_hills
+```
+
+For maps with missions, use `--list-missions` or render a specific mission:
+
+```powershell
+cargo run --manifest-path ingame_map/Cargo.toml --release -- avg_container_port --list-missions
+cargo run --manifest-path ingame_map/Cargo.toml --release -- avg_container_port --mission 1
 ```
 
 See `ingame_map/README.md` for full options.
