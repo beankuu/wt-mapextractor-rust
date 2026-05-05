@@ -32,6 +32,12 @@ cargo run --manifest-path ingame_map/Cargo.toml --release -- air_afghan --type h
 cargo run --manifest-path ingame_map/Cargo.toml --release -- avg_container_port --list-missions
 cargo run --manifest-path ingame_map/Cargo.toml --release -- avg_container_port --mission 1
 
+# Mission 0 disables mission overlays (same as --no-mission)
+cargo run --manifest-path ingame_map/Cargo.toml --release -- avg_container_port --mission 0
+
+# Batch render all extracted maps
+cargo run --manifest-path ingame_map/Cargo.toml --release -- --all --type main
+
 # Probe heightmap values at specific world (X,Z) metres
 cargo run --manifest-path ingame_map/Cargo.toml --release -- avg_vietnam_hills --probe 0,0 --probe 1500,-2000
 ```
@@ -40,9 +46,9 @@ cargo run --manifest-path ingame_map/Cargo.toml --release -- avg_vietnam_hills -
 
 Reads from `maps/<map_name>/`:
 
-- `terrain_paint.{jpg,png}` — required terrain colour image
-- `colormap.{jpg,png}` or `tile_grid.png` — fallback sources when terrain
-  paint is missing
+- `tile_grid.png` — preferred source for main/battle views when present (best detail)
+- `colormap.{jpg,png}` — next fallback
+- `terrain_paint.{jpg,png}` — final fallback
 - `manifest.json` — for `heightmap.world_extent`, `tankZone`, and optional
   `heightmapDetail` (HM2) sub-region cropping, `waterLevel`, and render
   instance metadata
@@ -58,5 +64,8 @@ Reads from `maps/<map_name>/`:
 By default writes `ingame_map/<map_name>_<type>.png`. Override with `--out`.
 
 For battle maps with `missions.json`, the tool prints a numbered mission list
-and asks which mission to draw. Use `--mission N` for scripts, or
-`--no-mission` to draw only the base battle-zone crop with objects and ocean.
+and asks which mission to draw. Use `--mission N` for scripts.
+
+Use `--mission 0` or `--no-mission` to disable mission overlays. In
+`--type battle`, this now renders the full map extent (not a forced tank-zone
+crop), which is useful when you want a full-size minimap.

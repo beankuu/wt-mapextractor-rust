@@ -122,6 +122,7 @@ function rowLabel(i) {
 
 function drawGrid(ctx, size, grid, viewRect) {
   const fontSize = Math.max(9, Math.round(size / 58));
+  const scaleLabelFont = Math.max(8, Math.round(fontSize * 0.78));
   const pad = Math.max(4, Math.round(size / 96));
   ctx.save();
   ctx.strokeStyle = 'rgba(230,238,255,0.55)';
@@ -154,14 +155,19 @@ function drawGrid(ctx, size, grid, viewRect) {
 
   const gridMeters = (viewRect.x1 - viewRect.x0) / grid;
   const label = `1 grid = ${formatMeters(gridMeters)}`;
-  ctx.font = `600 ${fontSize}px sans-serif`;
+  ctx.font = `600 ${scaleLabelFont}px sans-serif`;
   ctx.textAlign = 'right';
   ctx.textBaseline = 'bottom';
   const x = size - pad;
   const y = size - pad;
   const metrics = ctx.measureText(label);
   ctx.fillStyle = 'rgba(7,16,29,0.72)';
-  ctx.fillRect(x - metrics.width - pad, y - fontSize - pad, metrics.width + pad * 2, fontSize + pad * 1.5);
+  ctx.fillRect(
+    x - metrics.width - pad,
+    y - scaleLabelFont - pad,
+    metrics.width + pad * 2,
+    scaleLabelFont + pad * 1.5,
+  );
   ctx.fillStyle = 'rgba(245,248,255,0.96)';
   ctx.fillText(label, x, y);
   ctx.restore();

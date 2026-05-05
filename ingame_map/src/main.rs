@@ -9,6 +9,7 @@
 //!
 //! Usage:
 //!   wt-ingame-map <map_name> [--grid 10] [--size 1024] [--type main|heightmap|battle] [--mission N] [--out path]
+//!   wt-ingame-map --all      [--grid 10] [--size 1024] [--type main|heightmap|battle] [--no-mission]
 //!
 //! By default reads `maps/<map_name>/terrain_paint.jpg` (or `.png`) and
 //! `manifest.json`, writes `ingame_map/<map_name>_<type>.png`.
@@ -22,8 +23,10 @@ use std::process::ExitCode;
 use image::{imageops, Rgb, RgbImage};
 use serde_json::Value;
 
+#[derive(Clone)]
 struct Opts {
     map_name: String,
+    all: bool,
     grid: u32,
     size: u32,
     map_type: MapType,
@@ -34,6 +37,7 @@ struct Opts {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 enum MissionSelection {
     Interactive,
     Index(usize),
@@ -60,12 +64,13 @@ impl MapType {
 
 fn print_usage() {
     eprintln!(
-        "wt-ingame-map <map_name> [--grid N] [--size PX] [--type main|heightmap|battle] [--mission N] [--out PATH] [--probe X,Z ...]\n\
+        "wt-ingame-map <map_name|--all> [--grid N] [--size PX] [--type main|heightmap|battle] [--mission N] [--out PATH] [--probe X,Z ...]\n\
          \n\
          Renders an in-game-style tactical map from maps/<name>/ output images\n\
          with an overlaid N×N grid (default 10), ocean/object overlays, and a world-metre scale bar.\n\
-         --type battle crops to tankZone when present and can draw a selected mission overlay.\n\
-         --mission N    Draw mission N from the printed 1-based mission list.\n\
+         --all          Render all maps found under maps/ (skips interactive mission prompt).\n\
+         --type battle  Crops to tankZone when present and can draw a selected mission overlay.\n\
+         --mission N    Draw mission N from the printed 1-based mission list (0 = none).\n\
          --no-mission   Do not draw mission battle/capture/spawn overlays.\n\
          --list-missions Print available missions and exit.\n\
          \n\
@@ -87,6 +92,7 @@ fn parse_args() -> Result<Opts, String> {
     let mut probe: Vec<(f64, f64)> = Vec::new();
     let mut mission = MissionSelection::Interactive;
     let mut list_missions = false;
+    let mut all = false;
     let mut positional: Vec<String> = Vec::new();
     let mut i = 0;
     while i < args.len() {
@@ -123,19 +129,23 @@ fn parse_args() -> Result<Opts, String> {
                 i += 1;
                 let n: usize = args
                     .get(i)
-                    .ok_or_else(|| "--mission needs a 1-based mission number".to_string())?
+                    .ok_or_else(|| "--mission needs a mission number (0 = none, 1-based otherwise)".to_string())?
                     .parse()
                     .map_err(|e| format!("--mission: {e}"))?;
                 if n == 0 {
-                    return Err("--mission uses 1-based mission numbers".to_string());
+                    mission = MissionSelection::None;
+                } else {
+                    mission = MissionSelection::Index(n - 1);
                 }
-                mission = MissionSelection::Index(n - 1);
             }
             "--no-mission" => {
                 mission = MissionSelection::None;
             }
             "--list-missions" => {
                 list_missions = true;
+            }
+            "--all" => {
+                all = true;
             }
             "--probe" => {
                 i += 1;
@@ -161,10 +171,17 @@ fn parse_args() -> Result<Opts, String> {
         }
         i += 1;
     }
-    let map_name = positional.into_iter().next().ok_or_else(|| {
-        "missing <map_name>. Example: wt-ingame-map avg_vietnam_hills".to_string()
-    })?;
-    Ok(Opts { map_name, grid, size, map_type, out, probe, mission, list_missions })
+    let map_name = positional.into_iter().next().unwrap_or_default();
+    if map_name.is_empty() && !all {
+        return Err("missing <map_name>. Example: wt-ingame-map avg_vietnam_hills".to_string());
+    }
+    // --all must not block on interactive mission selection
+    let mission = if all && mission == MissionSelection::Interactive {
+        MissionSelection::None
+    } else {
+        mission
+    };
+    Ok(Opts { map_name, all, grid, size, map_type, out, probe, mission, list_missions })
 }
 
 #[derive(Clone, Copy)]
@@ -200,7 +217,7 @@ fn load_terrain_paint(viewer_dir: &Path) -> Result<RgbImage, String> {
 }
 
 fn load_main_map(viewer_dir: &Path) -> Result<RgbImage, String> {
-    for name in ["terrain_paint.jpg", "terrain_paint.png", "colormap.jpg", "colormap.png", "tile_grid.png"] {
+    for name in ["tile_grid.png", "colormap.png", "colormap.jpg", "terrain_paint.png", "terrain_paint.jpg"] {
         let p = viewer_dir.join(name);
         if p.exists() {
             return image::open(&p)
@@ -837,11 +854,13 @@ fn render(opts: &Opts) -> Result<PathBuf, String> {
         MapType::Main | MapType::Battle => load_main_map(&map_dir)?,
     };
 
-    // Type-specific crop: battle areas are authoritative; tankZone is only a fallback.
+    // Type-specific crop: with an explicit mission selection, battle areas are
+    // authoritative; without a mission, keep the full map extent.
     let crop_rect = match opts.map_type {
-        MapType::Battle => selected_mission_battle_extent(missions_json.as_ref(), mission_idx)
+        MapType::Battle if mission_idx.is_some() => selected_mission_battle_extent(missions_json.as_ref(), mission_idx)
             .or_else(|| tank_zone_rect(manifest.as_ref()).map(norm_rect))
             .or_else(|| mission_extent(missions_json.as_ref(), mission_idx)),
+        MapType::Battle => None,
         MapType::Main | MapType::Heightmap => None,
     };
     let source_extent = source_extent_rect(manifest.as_ref(), opts.map_type).map(norm_rect);
@@ -990,6 +1009,23 @@ fn render(opts: &Opts) -> Result<PathBuf, String> {
     Ok(out_path)
 }
 
+fn discover_maps() -> Vec<String> {
+    let maps_dir = PathBuf::from("maps");
+    let mut names = Vec::new();
+    if let Ok(entries) = fs::read_dir(&maps_dir) {
+        for ent in entries.flatten() {
+            let path = ent.path();
+            if path.is_dir() && path.join("manifest.json").exists() {
+                if let Some(name) = ent.file_name().to_str() {
+                    names.push(name.to_string());
+                }
+            }
+        }
+    }
+    names.sort();
+    names
+}
+
 fn main() -> ExitCode {
     let opts = match parse_args() {
         Ok(v) => v,
@@ -1009,6 +1045,35 @@ fn main() -> ExitCode {
                 ExitCode::from(1)
             }
         };
+    }
+    if opts.all {
+        let maps = discover_maps();
+        if maps.is_empty() {
+            eprintln!("no maps found under maps/ (each must have a manifest.json)");
+            return ExitCode::from(1);
+        }
+        let total = maps.len();
+        let mut ok = 0usize;
+        let mut failed = 0usize;
+        for (i, name) in maps.iter().enumerate() {
+            let mut o = opts.clone();
+            o.map_name = name.clone();
+            o.all = false;
+            print!("[{}/{}] {} ... ", i + 1, total, name);
+            let _ = io::stdout().flush();
+            match render(&o) {
+                Ok(p) => {
+                    println!("ok  {}", p.display());
+                    ok += 1;
+                }
+                Err(e) => {
+                    println!("FAILED: {e}");
+                    failed += 1;
+                }
+            }
+        }
+        println!("\ndone: {ok} ok, {failed} failed, {total} total");
+        return if failed == 0 { ExitCode::from(0) } else { ExitCode::from(1) };
     }
     match render(&opts) {
         Ok(p) => {

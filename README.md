@@ -178,7 +178,12 @@ For maps with missions, use `--list-missions` or render a specific mission:
 ```powershell
 cargo run --manifest-path ingame_map/Cargo.toml --release -- avg_container_port --list-missions
 cargo run --manifest-path ingame_map/Cargo.toml --release -- avg_container_port --mission 1
+cargo run --manifest-path ingame_map/Cargo.toml --release -- avg_container_port --mission 0
+cargo run --manifest-path ingame_map/Cargo.toml --release -- --all --type main
 ```
+
+`--mission 0` is equivalent to `--no-mission`. In `--type battle`, this now keeps
+the full map extent instead of forcing a battle-zone crop.
 
 See `ingame_map/README.md` for full options.
 

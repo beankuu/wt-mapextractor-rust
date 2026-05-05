@@ -3,7 +3,7 @@ maps/
 viewer_data/
 config.json
 oo2core*.dll
-
+ingame_map/*.png
 
 CHANGELOG.md
 
