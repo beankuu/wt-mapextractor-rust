@@ -18,11 +18,11 @@ cargo run --manifest-path ingame_map/Cargo.toml --release -- <map_name>
 Examples:
 
 ```powershell
-# Default 10×10 grid, 1024 px output under ingame_map/
+# Default 10×10 grid, 1024 px output under minimaps/
 cargo run --manifest-path ingame_map/Cargo.toml --release -- avg_vietnam_hills
 
 # Custom grid / size / output path
-cargo run --manifest-path ingame_map/Cargo.toml --release -- avg_vietnam_hills --grid 12 --size 2048 --out custom.png
+cargo run --manifest-path ingame_map/Cargo.toml --release -- avg_vietnam_hills --grid 12 --size 2048 --out custom.jpg
 
 # Choose minimap source: main terrain, heightmap, or battle-zone crop
 cargo run --manifest-path ingame_map/Cargo.toml --release -- avg_berlin --type battle
@@ -35,6 +35,9 @@ cargo run --manifest-path ingame_map/Cargo.toml --release -- avg_container_port 
 # Mission 0 disables mission overlays (same as --no-mission)
 cargo run --manifest-path ingame_map/Cargo.toml --release -- avg_container_port --mission 0
 
+# Render every mission battle zoom for one map (one output per mission)
+cargo run --manifest-path ingame_map/Cargo.toml --release -- avg_container_port --all-battle
+
 # Batch render all extracted maps
 cargo run --manifest-path ingame_map/Cargo.toml --release -- --all --type main
 
@@ -46,9 +49,9 @@ cargo run --manifest-path ingame_map/Cargo.toml --release -- avg_vietnam_hills -
 
 Reads from `maps/<map_name>/`:
 
-- `tile_grid.png` — preferred source for main/battle views when present (best detail)
-- `colormap.{jpg,png}` — next fallback
-- `terrain_paint.{jpg,png}` — final fallback
+- `terrain_paint.{png,jpg}` — preferred terrain colour source for main/battle views
+- `colormap.{png,jpg}` — next fallback
+- `tile_grid.png` — final fallback when painted terrain and colormap are missing
 - `manifest.json` — for `heightmap.world_extent`, `tankZone`, and optional
   `heightmapDetail` (HM2) sub-region cropping, `waterLevel`, and render
   instance metadata
@@ -61,7 +64,9 @@ Reads from `maps/<map_name>/`:
 
 ## Output
 
-By default writes `ingame_map/<map_name>_<type>.png`. Override with `--out`.
+By default writes compressed `minimaps/<map_name>_<type>.jpg`. Override with
+`--out`; `.jpg`/`.jpeg` paths are JPEG-encoded, other extensions use the image
+crate's matching encoder.
 
 For battle maps with `missions.json`, the tool prints a numbered mission list
 and asks which mission to draw. Use `--mission N` for scripts.
@@ -69,3 +74,7 @@ and asks which mission to draw. Use `--mission N` for scripts.
 Use `--mission 0` or `--no-mission` to disable mission overlays. In
 `--type battle`, this now renders the full map extent (not a forced tank-zone
 crop), which is useful when you want a full-size minimap.
+
+Use `--all-battle` to render every mission as a separate battle-zone-zoom
+output file (for example `minimaps/<map>_battle_m01.jpg`,
+`minimaps/<map>_battle_m02.jpg`, ...).

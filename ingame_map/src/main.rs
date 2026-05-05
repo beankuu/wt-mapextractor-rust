@@ -10,9 +10,10 @@
 //! Usage:
 //!   wt-ingame-map <map_name> [--grid 10] [--size 1024] [--type main|heightmap|battle] [--mission N] [--out path]
 //!   wt-ingame-map --all      [--grid 10] [--size 1024] [--type main|heightmap|battle] [--no-mission]
+//!   wt-ingame-map <map_name> --all-battle [--grid 10] [--size 1024] [--out path]
 //!
 //! By default reads `maps/<map_name>/terrain_paint.jpg` (or `.png`) and
-//! `manifest.json`, writes `ingame_map/<map_name>_<type>.png`.
+//! `manifest.json`, writes `minimaps/<map_name>_<type>.jpg`.
 
 use std::env;
 use std::fs;
@@ -20,13 +21,17 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use image::codecs::jpeg::JpegEncoder;
 use image::{imageops, Rgb, RgbImage};
 use serde_json::Value;
+
+const JPEG_QUALITY: u8 = 88;
 
 #[derive(Clone)]
 struct Opts {
     map_name: String,
     all: bool,
+    all_battle: bool,
     grid: u32,
     size: u32,
     map_type: MapType,
@@ -42,6 +47,7 @@ enum MissionSelection {
     Interactive,
     Index(usize),
     None,
+    AllBattle,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,11 +70,12 @@ impl MapType {
 
 fn print_usage() {
     eprintln!(
-        "wt-ingame-map <map_name|--all> [--grid N] [--size PX] [--type main|heightmap|battle] [--mission N] [--out PATH] [--probe X,Z ...]\n\
+        "wt-ingame-map <map_name|--all|--all-battle> [--grid N] [--size PX] [--type main|heightmap|battle] [--mission N] [--out PATH] [--probe X,Z ...]\n\
          \n\
          Renders an in-game-style tactical map from maps/<name>/ output images\n\
          with an overlaid N×N grid (default 10), ocean/object overlays, and a world-metre scale bar.\n\
          --all          Render all maps found under maps/ (skips interactive mission prompt).\n\
+         --all-battle   Render mission battle zooms. With <map_name>: one map. Without: all maps.\n\
          --type battle  Crops to tankZone when present and can draw a selected mission overlay.\n\
          --mission N    Draw mission N from the printed 1-based mission list (0 = none).\n\
          --no-mission   Do not draw mission battle/capture/spawn overlays.\n\
@@ -93,6 +100,7 @@ fn parse_args() -> Result<Opts, String> {
     let mut mission = MissionSelection::Interactive;
     let mut list_missions = false;
     let mut all = false;
+    let mut all_battle = false;
     let mut positional: Vec<String> = Vec::new();
     let mut i = 0;
     while i < args.len() {
@@ -147,6 +155,10 @@ fn parse_args() -> Result<Opts, String> {
             "--all" => {
                 all = true;
             }
+            "--all-battle" => {
+                all_battle = true;
+                mission = MissionSelection::AllBattle;
+            }
             "--probe" => {
                 i += 1;
                 let s = args
@@ -172,8 +184,11 @@ fn parse_args() -> Result<Opts, String> {
         i += 1;
     }
     let map_name = positional.into_iter().next().unwrap_or_default();
-    if map_name.is_empty() && !all {
+    if map_name.is_empty() && !all && !all_battle {
         return Err("missing <map_name>. Example: wt-ingame-map avg_vietnam_hills".to_string());
+    }
+    if all && all_battle {
+        return Err("--all-battle cannot be combined with --all".to_string());
     }
     // --all must not block on interactive mission selection
     let mission = if all && mission == MissionSelection::Interactive {
@@ -181,7 +196,8 @@ fn parse_args() -> Result<Opts, String> {
     } else {
         mission
     };
-    Ok(Opts { map_name, all, grid, size, map_type, out, probe, mission, list_missions })
+    let map_type = if all_battle { MapType::Battle } else { map_type };
+    Ok(Opts { map_name, all, all_battle, grid, size, map_type, out, probe, mission, list_missions })
 }
 
 #[derive(Clone, Copy)]
@@ -217,7 +233,7 @@ fn load_terrain_paint(viewer_dir: &Path) -> Result<RgbImage, String> {
 }
 
 fn load_main_map(viewer_dir: &Path) -> Result<RgbImage, String> {
-    for name in ["tile_grid.png", "colormap.png", "colormap.jpg", "terrain_paint.png", "terrain_paint.jpg"] {
+    for name in ["terrain_paint.png", "terrain_paint.jpg", "colormap.png", "colormap.jpg", "tile_grid.png"] {
         let p = viewer_dir.join(name);
         if p.exists() {
             return image::open(&p)
@@ -402,6 +418,7 @@ fn print_mission_list(missions_json: &Value) {
         return;
     }
     println!("Available missions:");
+    println!("  0. No mission  (full map, objects/ocean only)");
     for (i, mission) in list.iter().enumerate() {
         let caps = count_mode(array_items(mission, "captureZones"));
         let spawns = count_mode(array_items(mission, "spawns")) + count_mode(array_items(mission, "spawnZones"));
@@ -423,7 +440,7 @@ fn choose_mission(opts: &Opts, missions_json: Option<&Value>) -> Result<Option<u
         }
         MissionSelection::Interactive => {
             print_mission_list(missions_json);
-            print!("Pick mission number to draw, or press Enter for none: ");
+            print!("Pick mission number to draw (0/Enter for none): ");
             io::stdout().flush().map_err(|e| format!("failed to flush stdout: {e}"))?;
             let mut line = String::new();
             io::stdin().read_line(&mut line).map_err(|e| format!("failed to read mission selection: {e}"))?;
@@ -432,12 +449,69 @@ fn choose_mission(opts: &Opts, missions_json: Option<&Value>) -> Result<Option<u
                 return Ok(None);
             }
             let n: usize = trimmed.parse().map_err(|e| format!("mission selection: {e}"))?;
-            if n == 0 || n > list.len() {
+            if n == 0 {
+                return Ok(None);
+            }
+            if n > list.len() {
                 return Err(format!("mission {n} is out of range; found {} missions", list.len()));
             }
             Ok(Some(n - 1))
         }
+        MissionSelection::AllBattle => Err("internal: use render_all_battles() for --all-battle mode".to_string()),
     }
+}
+
+fn output_path_for_battle_mission(opts: &Opts, mission_idx: usize) -> PathBuf {
+    let mission_num = mission_idx + 1;
+    let default_name = format!("{}_battle_m{:02}.jpg", opts.map_name, mission_num);
+    let default_path = PathBuf::from("minimaps").join(default_name);
+    let Some(base) = opts.out.as_ref() else {
+        return default_path;
+    };
+    if base.extension().is_some() {
+        let parent = base.parent().unwrap_or_else(|| Path::new(""));
+        let ext = base
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("jpg");
+        let stem = base
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("battle");
+        parent.join(format!("{stem}_m{:02}.{ext}", mission_num))
+    } else {
+        base.join(format!("{}_battle_m{:02}.jpg", opts.map_name, mission_num))
+    }
+}
+
+fn render_all_battles(opts: &Opts) -> Result<Vec<PathBuf>, String> {
+    let map_dir = PathBuf::from("maps").join(&opts.map_name);
+    if !map_dir.is_dir() {
+        return Err(format!(
+            "map directory not found: {}. Run the main extractor first.",
+            map_dir.display()
+        ));
+    }
+    let missions_json = load_json(&map_dir.join("missions.json"));
+    let Some(missions_json) = missions_json.as_ref() else {
+        return Err(format!("no missions.json found for {}", opts.map_name));
+    };
+    let total = missions(missions_json).len();
+    if total == 0 {
+        return Err(format!("no missions found in missions.json for {}", opts.map_name));
+    }
+
+    let mut outputs = Vec::with_capacity(total);
+    for idx in 0..total {
+        let mut mission_opts = opts.clone();
+        mission_opts.all_battle = false;
+        mission_opts.map_type = MapType::Battle;
+        mission_opts.mission = MissionSelection::Index(idx);
+        mission_opts.out = Some(output_path_for_battle_mission(opts, idx));
+        let out = render(&mission_opts)?;
+        outputs.push(out);
+    }
+    Ok(outputs)
 }
 
 fn selected_mission_battle_extent(missions_json: Option<&Value>, mission_idx: Option<usize>) -> Option<WorldRect> {
@@ -626,8 +700,28 @@ fn glyph(ch: char) -> Option<[u8; 7]> {
         'X' => [0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11],
         'Y' => [0x11, 0x11, 0x11, 0x0A, 0x04, 0x04, 0x04],
         'Z' => [0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F],
+        '.' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C],
         _ => return None,
     })
+}
+
+fn text_width(text: &str, scale: u32) -> u32 {
+    text.chars()
+        .map(|ch| if ch == ' ' { 4 * scale } else { 6 * scale })
+        .sum()
+}
+
+fn save_output_image(img: &RgbImage, path: &Path) -> Result<(), String> {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+    if ext == "jpg" || ext == "jpeg" {
+        let f = fs::File::create(path).map_err(|e| format!("failed to create {}: {e}", path.display()))?;
+        let mut enc = JpegEncoder::new_with_quality(std::io::BufWriter::new(f), JPEG_QUALITY);
+        enc.encode(img.as_raw(), img.width(), img.height(), image::ExtendedColorType::Rgb8)
+            .map_err(|e| format!("failed to encode {}: {e}", path.display()))?;
+    } else {
+        img.save(path).map_err(|e| format!("failed to save {}: {e}", path.display()))?;
+    }
+    Ok(())
 }
 
 fn draw_text(img: &mut RgbImage, x: u32, y: u32, text: &str, scale: u32, c: Rgb<u8>) {
@@ -717,6 +811,9 @@ fn draw_ocean_overlay(img: &mut RgbImage, map_dir: &Path, manifest: Option<&Valu
 fn rendinst_style(pool: Option<&Value>) -> String {
     let cat = pool.and_then(|p| p.get("category")).and_then(Value::as_str).unwrap_or("other");
     let name = pool.and_then(|p| p.get("name")).and_then(Value::as_str).unwrap_or("").to_ascii_lowercase();
+    if cat == "tree" || ["tree", "bush", "shrub", "grass", "reed", "fern", "vegetation"].iter().any(|term| name.contains(term)) {
+        return if cat == "tree" || name.contains("tree") { "tree" } else { "vegetation" }.to_string();
+    }
     let building_terms = ["container", "warehouse", "hangar", "building", "house", "shed", "garage", "barrack", "port_crane", "crane", "terminal", "tower", "bunker", "fort", "wall", "bridge", "pillbox", "blockhouse", "castle", "church", "mosque", "factory", "plant", "station", "depot", "yard", "dock", "pier"];
     if building_terms.iter().any(|term| name.contains(term)) {
         return "building".to_string();
@@ -738,15 +835,29 @@ fn rendinst_style(pool: Option<&Value>) -> String {
 
 fn object_color(style: &str) -> Rgb<u8> {
     match style {
-        "tree" => Rgb([35, 130, 55]),
-        "bush" | "vegetation" => Rgb([100, 150, 58]),
+        "tree" => Rgb([20, 150, 45]),
+        "bush" | "vegetation" => Rgb([95, 175, 45]),
         "building" => Rgb([185, 188, 192]),
         "road" => Rgb([54, 54, 54]),
         "rock" => Rgb([126, 134, 142]),
         "debris" => Rgb([150, 58, 48]),
         "earthwork" => Rgb([130, 85, 50]),
-        _ => Rgb([220, 220, 220]),
+        _ => Rgb([180, 180, 180]),
     }
+}
+
+fn object_radius(style: &str, thumb: u32) -> i32 {
+    let base = (thumb / 420).max(1) as i32;
+    let radius = match style {
+        "tree" | "bush" | "vegetation" => (base + 1).max(2),
+        "building" => base.max(2),
+        _ => base.max(1),
+    };
+    ((radius as f32) * 0.5).ceil().max(1.0) as i32
+}
+
+fn is_vegetation_style(style: &str) -> bool {
+    matches!(style, "tree" | "bush" | "vegetation")
 }
 
 fn draw_objects_overlay(img: &mut RgbImage, map_dir: &Path, manifest: Option<&Value>, view: WorldRect, margin: u32, thumb: u32) {
@@ -756,24 +867,26 @@ fn draw_objects_overlay(img: &mut RgbImage, map_dir: &Path, manifest: Option<&Va
     let stride = if ri.get("stride").and_then(Value::as_u64) == Some(14) { 14usize } else { 10usize };
     let count = ri.get("instanceCount").and_then(Value::as_u64).unwrap_or((bytes.len() / stride) as u64) as usize;
     let pools = ri.get("pools").and_then(Value::as_array);
-    let dot = (thumb / 900).max(1) as i32;
 
-    for i in 0..count.min(bytes.len() / stride) {
-        let off = i * stride;
-        let pool_idx = u16::from_le_bytes([bytes[off], bytes[off + 1]]) as usize;
-        let wx = f32::from_le_bytes([bytes[off + 2], bytes[off + 3], bytes[off + 4], bytes[off + 5]]) as f64;
-        let wz_off = if stride == 14 { off + 10 } else { off + 6 };
-        let wz = f32::from_le_bytes([bytes[wz_off], bytes[wz_off + 1], bytes[wz_off + 2], bytes[wz_off + 3]]) as f64;
-        if wx < view.x0 || wx > view.x1 || wz < view.z0 || wz > view.z1 {
-            continue;
-        }
-        let pool = pools.and_then(|p| p.get(pool_idx));
-        let color = object_color(&rendinst_style(pool));
-        let (x, y) = world_to_img(view, margin, thumb, wx, wz);
-        for dy in 0..dot {
-            for dx in 0..dot {
-                blend_pixel_safe(img, x + dx, y + dy, color, 0.65);
+    for vegetation_pass in [false, true] {
+        for i in 0..count.min(bytes.len() / stride) {
+            let off = i * stride;
+            let pool_idx = u16::from_le_bytes([bytes[off], bytes[off + 1]]) as usize;
+            let wx = f32::from_le_bytes([bytes[off + 2], bytes[off + 3], bytes[off + 4], bytes[off + 5]]) as f64;
+            let wz_off = if stride == 14 { off + 10 } else { off + 6 };
+            let wz = f32::from_le_bytes([bytes[wz_off], bytes[wz_off + 1], bytes[wz_off + 2], bytes[wz_off + 3]]) as f64;
+            if wx < view.x0 || wx > view.x1 || wz < view.z0 || wz > view.z1 {
+                continue;
             }
+            let pool = pools.and_then(|p| p.get(pool_idx));
+            let style = rendinst_style(pool);
+            if is_vegetation_style(&style) != vegetation_pass {
+                continue;
+            }
+            let color = object_color(&style);
+            let radius = object_radius(&style, thumb);
+            let (x, y) = world_to_img(view, margin, thumb, wx, wz);
+            fill_circle(img, x, y, radius, color, 0.92);
         }
     }
 }
@@ -849,9 +962,46 @@ fn render(opts: &Opts) -> Result<PathBuf, String> {
     }
     let mission_idx = choose_mission(opts, missions_json.as_ref())?;
 
-    let terrain_full = match opts.map_type {
-        MapType::Heightmap => load_heightmap_map(&map_dir, manifest.as_ref())?,
-        MapType::Main | MapType::Battle => load_main_map(&map_dir)?,
+    // For Battle type: if an HM2 detail zone exists, use terrain_paint_detail.jpg
+    // as the source image and the heightmapDetail world extent as source_extent.
+    let hm2_source: Option<(RgbImage, WorldRect)> = if opts.map_type == MapType::Battle {
+        let detail_file = manifest.as_ref()
+            .and_then(|m| m.get("terrainPaint"))
+            .and_then(|tp| tp.get("detail"))
+            .and_then(|d| d.get("file"))
+            .and_then(Value::as_str);
+        let hm2_extent = manifest.as_ref()
+            .and_then(|m| m.get("heightmapDetail"))
+            .and_then(|d| {
+                let x0 = d.get("world_x0").and_then(Value::as_f64)?;
+                let z0 = d.get("world_z0").and_then(Value::as_f64)?;
+                let x1 = d.get("world_x1").and_then(Value::as_f64)?;
+                let z1 = d.get("world_z1").and_then(Value::as_f64)?;
+                Some(norm_rect((x0, z0, x1, z1)))
+            });
+        match (detail_file, hm2_extent) {
+            (Some(file), Some(extent)) => {
+                let path = map_dir.join(file);
+                if path.exists() {
+                    image::open(&path).ok().map(|img| (img.to_rgb8(), extent))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    let (terrain_full, hm2_override_extent) = if let Some((img, ext)) = hm2_source {
+        (img, Some(ext))
+    } else {
+        let img = match opts.map_type {
+            MapType::Heightmap => load_heightmap_map(&map_dir, manifest.as_ref())?,
+            MapType::Main | MapType::Battle => load_main_map(&map_dir)?,
+        };
+        (img, None)
     };
 
     // Type-specific crop: with an explicit mission selection, battle areas are
@@ -863,7 +1013,9 @@ fn render(opts: &Opts) -> Result<PathBuf, String> {
         MapType::Battle => None,
         MapType::Main | MapType::Heightmap => None,
     };
-    let source_extent = source_extent_rect(manifest.as_ref(), opts.map_type).map(norm_rect);
+    // HM2 detail extent takes priority over tile-grid-based source extent for Battle type.
+    let source_extent = hm2_override_extent
+        .or_else(|| source_extent_rect(manifest.as_ref(), opts.map_type).map(norm_rect));
     let (terrain, view_rect) = match (source_extent, crop_rect) {
         (Some(source_rect), Some(detail_rect)) => {
             let tw = terrain_full.width() as f64;
@@ -978,13 +1130,19 @@ fn render(opts: &Opts) -> Result<PathBuf, String> {
         let cell_m = world_m / grid as f64;
         let bar_px = (thumb_w as f64 / grid as f64).round().max(1.0) as u32;
         let txt = format_grid_meters(cell_m);
-        let txt_w = (txt.chars().count() as u32) * 6 * scale_font;
+        let txt_w = text_width(&txt, scale_font);
         let bar_x = margin + thumb_w - bar_px - 8;
         let bar_y = margin + thumb_h + 6;
         if bar_y + 4 < size {
             draw_rect(&mut img, bar_x, bar_y, bar_px, 3, label_color, true);
             let text_x = (margin + thumb_w).saturating_sub(txt_w + 8);
-            draw_text(&mut img, text_x, bar_y + 6, &txt, scale_font, label_color);
+            let text_h = 7 * scale_font;
+            let text_y = if bar_y + 6 + text_h + 2 < size {
+                bar_y + 6
+            } else {
+                bar_y.saturating_sub(text_h + 4)
+            };
+            draw_text(&mut img, text_x, text_y, &txt, scale_font, label_color);
         }
     }
 
@@ -997,15 +1155,14 @@ fn render(opts: &Opts) -> Result<PathBuf, String> {
                 MapType::Heightmap => "heightmap",
                 MapType::Battle => "battle",
             };
-            PathBuf::from("ingame_map").join(format!("{}_{}.png", opts.map_name, suffix))
+            PathBuf::from("minimaps").join(format!("{}_{}.jpg", opts.map_name, suffix))
         });
     if let Some(parent) = out_path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent).map_err(|e| format!("failed to create {}: {e}", parent.display()))?;
         }
     }
-    img.save(&out_path)
-        .map_err(|e| format!("failed to save {}: {e}", out_path.display()))?;
+    save_output_image(&img, &out_path)?;
     Ok(out_path)
 }
 
@@ -1074,6 +1231,58 @@ fn main() -> ExitCode {
         }
         println!("\ndone: {ok} ok, {failed} failed, {total} total");
         return if failed == 0 { ExitCode::from(0) } else { ExitCode::from(1) };
+    }
+    if opts.all_battle {
+        if opts.map_name.is_empty() {
+            let maps = discover_maps();
+            if maps.is_empty() {
+                eprintln!("no maps found under maps/ (each must have a manifest.json)");
+                return ExitCode::from(1);
+            }
+            let total = maps.len();
+            let mut rendered_maps = 0usize;
+            let mut skipped_maps = 0usize;
+            let mut failed_maps = 0usize;
+            let mut rendered_images = 0usize;
+            for (i, name) in maps.iter().enumerate() {
+                let mut o = opts.clone();
+                o.map_name = name.clone();
+                o.all_battle = true;
+                print!("[{}/{}] {} ... ", i + 1, total, name);
+                let _ = io::stdout().flush();
+                match render_all_battles(&o) {
+                    Ok(paths) => {
+                        rendered_maps += 1;
+                        rendered_images += paths.len();
+                        println!("ok  {} outputs", paths.len());
+                    }
+                    Err(e) if e.contains("no missions.json") || e.contains("no missions found") => {
+                        skipped_maps += 1;
+                        println!("skip ({e})");
+                    }
+                    Err(e) => {
+                        failed_maps += 1;
+                        println!("FAILED: {e}");
+                    }
+                }
+            }
+            println!(
+                "\ndone: {rendered_maps} maps rendered, {skipped_maps} maps skipped, {failed_maps} maps failed, {rendered_images} images total"
+            );
+            return if failed_maps == 0 { ExitCode::from(0) } else { ExitCode::from(1) };
+        }
+        match render_all_battles(&opts) {
+            Ok(paths) => {
+                for p in paths {
+                    println!("wrote {}", p.display());
+                }
+                return ExitCode::from(0);
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                return ExitCode::from(1);
+            }
+        }
     }
     match render(&opts) {
         Ok(p) => {

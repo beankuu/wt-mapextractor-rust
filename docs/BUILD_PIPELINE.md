@@ -212,12 +212,16 @@ Replaces NaN-filled LR region with actual HM2 world heights. Uses 16-pixel outwa
 - Tile size computed from BLK `size` parameter: `px = out_px * (worldSize / mapWorldSize)`
 - Blends each landclass by its blurred weight value
 - Unpainted areas (ocean) filled with `[20, 60, 120]` (dark blue)
+- Water placement is handled after compositing by the height-derived water mask.
+  Authored underwater landclass names are not used as standalone water placement:
+  they can be broad shoreline/sand splat layers and may extend above the water
+  plane, so height remains the authority for where water is painted.
 
 **GPU compute path:** If wgpu is available, compositing runs via a WGSL compute shader (weight map blending in parallel). Falls back to CPU NumPy path.
 
 **Outputs:**
-- `<map-output>/terrain_paint.png` (RGB, up to ~8192×8192)
-- `<map-output>/terrain_paint_detail.png` (RGB, 8192px at HM2 resolution — separate for battle-area detail mesh)
+- `<map-output>/terrain_paint.{jpg,png}` (RGB, up to ~8192×8192)
+- `<map-output>/terrain_paint_detail.{jpg,png}` (RGB, 4096×4096 HM2-region patch saved at higher JPEG quality when compressed)
 - `<map-output>/heightmap_float.npy` (float32 heights for water masking)
 
 ---

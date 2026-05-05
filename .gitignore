@@ -4,6 +4,9 @@ viewer_data/
 config.json
 oo2core*.dll
 ingame_map/*.png
+ingame_map/*.jpg
+minimaps/*.png
+minimaps/*.jpg
 
 CHANGELOG.md
 

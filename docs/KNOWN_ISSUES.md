@@ -46,6 +46,22 @@ Tracking document for map extraction problems, workarounds, and format quirks.
 
 **Fix:** `build_painted_terrain()` now loads `heightmap_float.npy` (float32, saved during extract_heightmap) and compares `hm_world <= water_level` in world meters. Falls back to 8-bit PNG if float data unavailable.
 
+### Authored Underwater Splat Layers vs Water Plane
+
+**Affected maps:** Ground maps with interior lakes or underwater sand/shore landclasses.
+
+**Problem:** Height-only water masking can miss shallow authored lake edges whose
+heightmap samples sit just above `waterLevel`. A coarse follow-up attempt marked
+entire cells containing an underwater landclass as water, which over-painted whole
+tiles. Sampling authored underwater splat pixels directly also proved too broad:
+these materials can represent shoreline or submerged sand layers that extend up
+slopes and above the actual water plane.
+
+**Current policy:** Water is painted by the height-derived mask, with per-cell
+protection to avoid flooding authored land. Authored underwater landclass names
+are not treated as water placement by themselves; height remains the source of
+truth for avoiding mountain/shoreline false positives.
+
 ### Maps Without Any Heightmap Source
 
 **Affected maps:** Some maps have no HM2 block, no LandRayTracer data, and no colormap for pseudo-heightmap (only a DXT5nm normal map).

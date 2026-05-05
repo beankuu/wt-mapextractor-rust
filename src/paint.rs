@@ -14,13 +14,19 @@ use crate::util::{decode_dds_bytes, read_i32_le, read_u32_le};
 
 /// JPEG quality used for all terrain paint outputs (0-100).
 const JPEG_QUALITY: u8 = 84;
+const DETAIL_JPEG_QUALITY: u8 = 96;
+const WATER_COLOR: [u8; 3] = [20, 60, 120];
 
 fn save_rgb_image(img: &RgbImage, path: &Path, compress: bool) -> Result<()> {
+    save_rgb_image_with_quality(img, path, compress, JPEG_QUALITY)
+}
+
+fn save_rgb_image_with_quality(img: &RgbImage, path: &Path, compress: bool, jpeg_quality: u8) -> Result<()> {
     if compress {
         // Save as JPEG (compressed output path).
         let f = std::fs::File::create(path)
             .with_context(|| format!("Failed to create {}", path.display()))?;
-        let mut enc = JpegEncoder::new_with_quality(std::io::BufWriter::new(f), JPEG_QUALITY);
+        let mut enc = JpegEncoder::new_with_quality(std::io::BufWriter::new(f), jpeg_quality);
         enc.encode(img.as_raw(), img.width(), img.height(), image::ExtendedColorType::Rgb8)
             .with_context(|| format!("Failed to encode JPEG {}", path.display()))?;
     } else {
@@ -265,8 +271,70 @@ fn apply_water_mask(
     // inland regions like Berlin as ocean.
     let mut reached_count = 0usize;
     for &b in &reachable { reached_count += b as usize; }
-    let use_mask: &[u8] = if reached_count > 0 {
-        &reachable
+    let mut water_override_cells: Option<Vec<bool>> = None;
+    if let Some(p) = protection {
+        let mut water_counts = vec![0usize; p.grid_w * p.grid_h];
+        let mut pixel_counts = vec![0usize; p.grid_w * p.grid_h];
+        for (i, &m) in cand.iter().enumerate() {
+            let x = (i as u32) % cw;
+            let y = (i as u32) / cw;
+            let cx = (x / p.tile_w) as usize;
+            let cz = (y / p.tile_h) as usize;
+            if cx >= p.grid_w || cz >= p.grid_h {
+                continue;
+            }
+            let ci = cz * p.grid_w + cx;
+            pixel_counts[ci] += 1;
+            if m != 0 {
+                water_counts[ci] += 1;
+            }
+        }
+        water_override_cells = Some(
+            water_counts
+                .iter()
+                .zip(pixel_counts.iter())
+                .map(|(&water, &total)| total > 0 && (water as f64 / total as f64) >= 0.08)
+                .collect(),
+        );
+    }
+
+    let mut mask_owned: Option<Vec<u8>> = None;
+    if reached_count > 0 {
+        let mut merged = reachable.clone();
+        if let Some(overrides) = water_override_cells.as_ref() {
+            if let Some(p) = protection {
+                for (i, &m) in cand.iter().enumerate() {
+                    if m == 0 {
+                        continue;
+                    }
+                    let x = (i as u32) % cw;
+                    let y = (i as u32) / cw;
+                    let cx = (x / p.tile_w) as usize;
+                    let cz = (y / p.tile_h) as usize;
+                    if cx < p.grid_w && cz < p.grid_h && overrides[cz * p.grid_w + cx] {
+                        merged[i] = 1;
+                    }
+                }
+            }
+        }
+        mask_owned = Some(merged);
+    } else if let (Some(overrides), Some(p)) = (water_override_cells.as_ref(), protection) {
+        let mut merged = vec![0u8; cand.len()];
+        for (i, &m) in cand.iter().enumerate() {
+            if m == 0 {
+                continue;
+            }
+            let x = (i as u32) % cw;
+            let y = (i as u32) / cw;
+            let cx = (x / p.tile_w) as usize;
+            let cz = (y / p.tile_h) as usize;
+            if cx < p.grid_w && cz < p.grid_h && overrides[cz * p.grid_w + cx] {
+                merged[i] = 1;
+            }
+        }
+        if merged.iter().any(|&m| m != 0) {
+            mask_owned = Some(merged);
+        }
     } else {
         let cand_ratio = {
             let mut c = 0usize;
@@ -274,13 +342,10 @@ fn apply_water_mask(
             c as f64 / npx as f64
         };
         if cand_ratio < 0.05 {
-            &cand
-        } else {
-            // Large candidate region with no border contact → likely a
-            // landlocked river/plain triggered the threshold. Skip.
-            return;
+            mask_owned = Some(cand.clone());
         }
-    };
+    }
+    let Some(use_mask) = mask_owned.as_deref() else { return; };
 
     let out_raw = canvas.as_mut();
     out_raw
@@ -298,14 +363,19 @@ fn apply_water_mask(
                     let cz = (y / p.tile_h) as usize;
                     if cx < p.grid_w && cz < p.grid_h {
                         let ci = cz * p.grid_w + cx;
-                        if p.protected_cells.get(ci).copied().unwrap_or(false) {
+                        let water_override = water_override_cells
+                            .as_ref()
+                            .and_then(|cells| cells.get(ci))
+                            .copied()
+                            .unwrap_or(false);
+                        if p.protected_cells.get(ci).copied().unwrap_or(false) && !water_override {
                             return;
                         }
                     }
                 }
-                o[0] = 20;
-                o[1] = 60;
-                o[2] = 120;
+                o[0] = WATER_COLOR[0];
+                o[1] = WATER_COLOR[1];
+                o[2] = WATER_COLOR[2];
             }
         });
 }
@@ -392,8 +462,8 @@ fn blend_cell_seams(canvas: &mut RgbImage, tile_w: u32, tile_h: u32, border: u32
             let ar = (sr / n) as f32;
             let ag = (sg / n) as f32;
             let ab = (sb / n) as f32;
-            // Linear fade: seam center (d=0) = fully blurred, seam edge (d=border) = original.
-            let alpha = 1.0 - (d as f32) * inv_border;
+            // Stronger fade: keep blur influence higher across the seam band.
+            let alpha = (1.0 - (d as f32) * inv_border).sqrt();
             let p = idx * 3;
             let orig_r = src_raw[p] as f32;
             let orig_g = src_raw[p + 1] as f32;
@@ -647,6 +717,29 @@ pub fn collect_lc_texture_candidates(lc: &Value) -> Vec<String> {
     cands
 }
 
+fn collect_detail_texture_candidates(name: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let push_unique = |out: &mut Vec<String>, s: String| {
+        if !s.is_empty() && !out.iter().any(|c| c == &s) {
+            out.push(s);
+        }
+    };
+
+    let n = name.trim();
+    if n.is_empty() {
+        return out;
+    }
+    push_unique(&mut out, n.to_string());
+    if let Some(short) = n.strip_prefix("detail_") {
+        push_unique(&mut out, short.to_string());
+        push_unique(&mut out, format!("{short}_tex_d"));
+    }
+    if !n.ends_with("_tex_d") {
+        push_unique(&mut out, format!("{n}_tex_d"));
+    }
+    out
+}
+
 fn load_texture_png(name: &str, viewer_dir: &Path, dds_store: &DdsStore) -> Option<RgbImage> {
     let mat_png = viewer_dir.join("mat").join(format!("{name}.png"));
     if mat_png.exists() {
@@ -746,8 +839,11 @@ fn build_lc_materials(
         if let Some(obj) = lc.get("details").and_then(Value::as_object) {
             for (detail_idx, key) in [(0usize, "R"), (1usize, "G"), (2usize, "B"), (3usize, "K")] {
                 if let Some(name) = obj.get(key).and_then(Value::as_str) {
-                    if let Some(img) = load_cached_texture(name, &mut texture_cache, viewer_dir, dds_store) {
-                        detail_textures[detail_idx] = Some(img);
+                    for cand in collect_detail_texture_candidates(name) {
+                        if let Some(img) = load_cached_texture(&cand, &mut texture_cache, viewer_dir, dds_store) {
+                            detail_textures[detail_idx] = Some(img);
+                            break;
+                        }
                     }
                 }
             }
@@ -856,6 +952,7 @@ fn blend_tile_into(
     let t2y_scale = if tex2_h > 0 { tex2_h as f32 / h as f32 } else { 0.0 };
     let lc_len = lc_mats.len();
     let primary_ids = [det[0] as usize, det[1] as usize, det[2] as usize, det[3] as usize];
+    let secondary_ids = [det[4] as usize, det[5] as usize, det[6] as usize];
     let primary_single_lc = if use_single_lc_detail_mix {
         primary_ids
             .iter()
@@ -929,7 +1026,7 @@ fn blend_tile_into(
                 let p2g = tex2_raw[p2_off + 1] as i32;
                 let p2a = if has_alpha2 { tex2_raw[p2_off + 3] as i32 } else { 0i32 };
                 let t2_weights = [p2g, p2r, p2a];
-                let t2_ids = [det[4] as usize, det[5] as usize, det[6] as usize];
+                let t2_ids = secondary_ids;
                 for i in 0..3 {
                     let wv = t2_weights[i];
                     let idx = t2_ids[i];
@@ -953,9 +1050,9 @@ fn blend_tile_into(
                     dest[o_off + 1] = c[1];
                     dest[o_off + 2] = c[2];
                 } else {
-                    dest[o_off] = 20;
-                    dest[o_off + 1] = 60;
-                    dest[o_off + 2] = 120;
+                    dest[o_off] = WATER_COLOR[0];
+                    dest[o_off + 1] = WATER_COLOR[1];
+                    dest[o_off + 2] = WATER_COLOR[2];
                 }
             } else {
                 dest[o_off] = (cr / tw).clamp(0, 255) as u8;
@@ -1027,8 +1124,8 @@ pub fn build_terrain_paint_native(
     let native_tile_w = first.width();
     let native_tile_h = first.height();
 
-    // Match Python-style quality target: cap the largest output dimension to 8192,
-    // with per-cell size in [64, 512] to avoid extreme memory usage.
+    // Match Python-style quality target: cap the largest output dimension to
+    // 8192, with per-cell size in [64, 512] to avoid extreme memory usage.
     let max_dim = (grid_w.max(grid_h) as u32).max(1);
     let target_cell_px = (8192u32 / max_dim).clamp(64, 512);
     let tile_w = target_cell_px;
@@ -1246,7 +1343,7 @@ pub fn build_terrain_paint_native(
     // Feather cell-grid seams to hide the regular cell boundaries produced
     // by per-cell LC splatmap compositing. Operates only on a narrow band
     // around each seam to preserve interior detail.
-    blend_cell_seams(&mut canvas, tile_w, tile_h, 6);
+    blend_cell_seams(&mut canvas, tile_w, tile_h, 10);
 
     // Apply overview normalmap lighting like Python before water masking.
     apply_normalmap_lighting(
@@ -1338,7 +1435,7 @@ pub fn build_terrain_paint_native(
                     } else {
                         viewer_dir.join("terrain_paint_detail.png")
                     };
-                    save_rgb_image(&detail_img, &det_path, compress_maps)
+                    save_rgb_image_with_quality(&detail_img, &det_path, compress_maps, DETAIL_JPEG_QUALITY)
                         .with_context(|| format!("Failed to save {}", det_path.display()))?;
                     detail_info = json!({
                         "file": if compress_maps { "terrain_paint_detail.jpg" } else { "terrain_paint_detail.png" },
